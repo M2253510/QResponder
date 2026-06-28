@@ -37,7 +37,12 @@ def run_pipeline(
     questions = extract_questions(doc, provider)
 
     library = AnswerLibrary.load(qa_path)
-    kb = InContextKB.load(kb_dir)
+    if config.kb_mode == "retrieval":
+        from ..kb.retrieval import RetrievalKB
+
+        kb = RetrievalKB.load(kb_dir, config)
+    else:
+        kb = InContextKB.load(kb_dir)
 
     log.info("Answering %d question(s)", len(questions))
     results = orchestrate(questions, provider, library, kb, config, scope_tags=scope_tags)

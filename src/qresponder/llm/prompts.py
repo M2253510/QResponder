@@ -60,3 +60,43 @@ def build_answer_user(kb_context: str, questions: list[dict]) -> str:
         f"{KB_CONTEXT_MARKER}\n{kb_context}\n\n"
         f"{QUESTIONS_MARKER}\n{json.dumps(questions, ensure_ascii=False, indent=2)}"
     )
+
+
+# --- Faithfulness / citation verification (Phase 1, §11) ---------------------
+
+FAITHFULNESS_SYSTEM = (
+    "You are a strict faithfulness verifier for compliance answers. For each "
+    "item you are given an answer and the snippets it cites. Decide whether "
+    "EVERY factual claim in the answer is directly entailed by the cited "
+    "snippets — not merely topically related. If any claim is not supported by "
+    "the snippets, the item is NOT faithful. Be conservative: when in doubt, "
+    "mark it not faithful. Return ONLY a JSON array, no prose, no code fences. "
+    "Each item: {id (string), faithful (boolean), unsupported_claims (array of strings)}."
+)
+
+
+def build_faithfulness_user(items: list[dict]) -> str:
+    """items: [{id, answer, snippets: [str, ...]}]."""
+    return (
+        "Verify each item's faithfulness against its cited snippets.\n\n"
+        + json.dumps(items, ensure_ascii=False, indent=2)
+    )
+
+
+# --- Eval correctness judge (Phase 1, §11) -----------------------------------
+
+EVAL_CORRECTNESS_SYSTEM = (
+    "You are grading answers against a list of expected key facts. For each "
+    "item, decide which key facts are covered by the answer and which are "
+    "missing. A fact is covered only if the answer actually states it. "
+    "Return ONLY a JSON array, no prose, no code fences. Each item: "
+    "{id (string), covered_facts (array of strings), missing_facts (array of strings)}."
+)
+
+
+def build_eval_correctness_user(items: list[dict]) -> str:
+    """items: [{id, answer, key_facts: [str, ...]}]."""
+    return (
+        "Grade each answer's coverage of its key facts.\n\n"
+        + json.dumps(items, ensure_ascii=False, indent=2)
+    )

@@ -18,6 +18,7 @@ _REASON_TITLES = {
     ReviewReason.FAITHFULNESS_FAIL: "Failed faithfulness check",
     ReviewReason.PARSE_ERROR: "Model output could not be parsed",
     ReviewReason.ATTACHMENT_UNRESOLVED: "Attachment requested — resolve a document",
+    ReviewReason.LIBRARY_CANDIDATE: "Possible Answer Library match — confirm reuse",
     ReviewReason.NONE: "Flagged for review",
 }
 

@@ -62,6 +62,9 @@ class Config(BaseModel):
     max_kb_chars: int = 150_000
     verify_faithfulness: bool = True
     batch_size: int = 12
+    # Cross-encoder rerank score at/above which retrieval counts as "strong"
+    # for the confidence rule (§11). Tunable per reranker.
+    strong_rerank_score: float = 0.0
 
     extra: dict = Field(default_factory=dict)
 

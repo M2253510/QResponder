@@ -71,5 +71,17 @@ def extract_questions(doc: Document, provider: LLMProvider) -> list[Question]:
         if q is not None:
             questions.append(q)
 
+    # GUARDRAIL (F3): results are keyed by question id downstream; a model that
+    # emits duplicate ids would silently drop questions. Make ids unique,
+    # preserving model ids where unique and suffixing on collision.
+    seen: set[str] = set()
+    for q in questions:
+        base = q.id
+        n = 2
+        while q.id in seen:
+            q.id = f"{base}-{n}"
+            n += 1
+        seen.add(q.id)
+
     log.info("Extracted %d question(s)", len(questions))
     return questions

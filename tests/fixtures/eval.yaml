@@ -1,0 +1,14 @@
+# Tiny golden eval set for tests (mirrors fixtures/kb + fixtures/qa.yaml).
+- question: "Do you encrypt data at rest?"
+  key_facts: ["AES-256"]
+  tags: [soc2, encryption]
+  expected_source: "policy_encryption.md"
+
+- question: "Do you have a documented incident response plan?"
+  key_facts: ["incident response"]
+  tags: [soc2, incident-response]
+  expected_source: "policy_incident_response.md"
+
+- question: "What is the data retention period for customer backups?"
+  key_facts: []   # unsupported -> should be flagged, not answered
+  tags: [soc2]

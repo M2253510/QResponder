@@ -39,6 +39,7 @@ class ReviewReason(str, Enum):
     FAITHFULNESS_FAIL = "faithfulness_fail"
     PARSE_ERROR = "parse_error"
     ATTACHMENT_UNRESOLVED = "attachment_unresolved"
+    LIBRARY_CANDIDATE = "library_candidate"
 
 
 class Question(BaseModel):

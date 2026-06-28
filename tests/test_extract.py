@@ -34,6 +34,23 @@ def test_extract_from_xlsx_fixture():
     assert enc.answer_type == AnswerType.YES_NO
 
 
+def test_extract_dedupes_duplicate_ids():
+    """F3: a model emitting duplicate ids must not drop a question."""
+    dup = MockProvider(
+        responses=['[{"id":"1","question_text":"Do you encrypt at rest?","answer_type":"yes_no"},'
+                   '{"id":"1","question_text":"Do you enforce MFA?","answer_type":"yes_no"}]']
+    )
+    doc = load_document(FIX / "sample.xlsx")
+    questions = extract_questions(doc, dup)
+    assert len(questions) == 2
+    ids = [q.id for q in questions]
+    assert len(set(ids)) == 2, f"ids not unique: {ids}"
+    # Both question texts survive.
+    texts = {q.text for q in questions}
+    assert "Do you encrypt at rest?" in texts
+    assert "Do you enforce MFA?" in texts
+
+
 def test_extract_retries_then_raises_on_garbage():
     bad = MockProvider(responses=["not json", "still not json"])
     doc = load_document(FIX / "sample.xlsx")

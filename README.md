@@ -9,11 +9,13 @@ with any model: a local Llama/Qwen via Ollama/vLLM, or a cloud API. A security
 tool that demands you upload your security posture to someone's cloud is a
 contradiction — so QRESPONDER doesn't.
 
-> **Status:** Phase 0 (core loop). Ingest → AI-extract questions → answer
-> grounded from KB (+ approved Q&A) → cite + confidence + NEEDS_REVIEW → write
-> output + review report. Two-adapter BYOM, `doctor` preflight, CLI, Docker,
-> mock-tested. Phases 1 (hybrid retrieval + faithfulness + eval) and 2 (ambiguity,
-> attachments, format-perfect write-back, flywheel) follow.
+> **Status:** Phase 0 (core loop) **+ Phase 1 (accuracy hardening)**. Ingest →
+> AI-extract questions → answer grounded from KB (+ approved Q&A) → cite +
+> faithfulness-verify + confidence + NEEDS_REVIEW → write output + review report.
+> Phase 1 adds hybrid retrieval (BM25 + dense + RRF) → cross-encoder rerank,
+> faithfulness/citation verification, and an eval harness. Two-adapter BYOM,
+> `doctor` preflight, CLI, Docker, mock-tested. Phase 2 (ambiguity, attachments,
+> format-perfect write-back, flywheel) follows.
 
 ## Why it's honest by construction
 
@@ -69,6 +71,59 @@ Run it before anything else. It checks: endpoint reachable → model exists →
 tiny completion succeeds → tiny JSON parse succeeds → (Phase 1) embeddings +
 reranker load. It prints ✅ or a precise, actionable error.
 
+## Retrieval mode (Phase 1)
+
+For larger knowledge bases, switch from dumping the whole KB in-context to
+hybrid retrieval — the single biggest quality jump over naive RAG:
+
+```
+qresponder answer -q f.xlsx --kb ./kb --mode retrieval        # or KB_MODE=retrieval in .env
+```
+
+It runs **BM25 (sparse) + dense embeddings in parallel**, fuses with
+**Reciprocal Rank Fusion (k=60)**, retrieves the top 20, **reranks with a local
+cross-encoder**, and passes the top 5 to the model — per question. BM25 nails
+exact control names/acronyms ("MFA", "ISO 27001") that embeddings miss; dense
+nails paraphrase. Install the local stack and note the first-run model download:
+
+```
+pip install -e ".[retrieval]"     # rank-bm25 + sentence-transformers (local, offline after download)
+```
+
+Models are configurable (`EMBEDDING_MODEL`, `RERANKER_MODEL`; `ms-marco-MiniLM-L-6-v2`
+is a good CPU/zero-cost reranker). The local path makes **zero external network
+calls** once models are cached.
+
+## Faithfulness verification (Phase 1)
+
+Every *generated* `ANSWERED` result is checked that each factual claim is
+actually entailed by its cited snippet — not just topically related (the
+"grounded-but-wrong" gap). Failures are downgraded to `NEEDS_REVIEW` /
+`faithfulness_fail`. Tier-1 approved-library reuse is exempt (it's grounded by
+human approval). Toggle with `VERIFY_FAITHFULNESS=true|false`. Confidence is
+explainable, never a fake percentage:
+
+- **HIGH** — Tier-1 approved-library reuse, *or* generated with faithfulness
+  passed **and** a strong rerank score.
+- **MEDIUM** — generated, answered, weaker/no retrieval signal.
+- **LOW / NEEDS_REVIEW** — faithfulness failed, unsupported, ambiguous, weak
+  retrieval, or parse error.
+
+## Evaluate your model (Phase 1)
+
+Turn "is my local Llama good enough?" into numbers:
+
+```
+qresponder eval --set eval.yaml --kb ./kb --qa qa.yaml --mode retrieval
+```
+
+It runs a golden set (`eval.example.yaml` for the format) through the real
+answer path and reports **Recall@K** (was the expected source retrieved),
+**faithfulness rate**, **answer correctness** (LLM-judge on key-fact coverage),
+and **coverage** (% auto-answered vs % flagged, by reason). The correctness
+judge should be calibrated against a small human-graded baseline — judges
+hallucinate too.
+
 ## Honest accuracy stance
 
 Best results come from a frontier API model or a large local model. Small local
@@ -107,9 +162,9 @@ tag-scoped so GDPR questions don't pull SOC 2 evidence.
 
 ## Phase roadmap
 
-- **Phase 0** — core loop (this release).
+- **Phase 0** — core loop. ✅
 - **Phase 1** — hybrid retrieval (BM25 + dense + RRF) → cross-encoder rerank;
-  faithfulness/citation verification; tag-scoping; eval harness.
+  faithfulness/citation verification; tag-scoping; eval harness. ✅
 - **Phase 2** — ambiguity/interpretation surfacing; attachment resolution;
   format-perfect write-back; hardened approved-answer flywheel.
 - **Phase 3** — prior-submission mining + cross-source conflict detection; web

@@ -2,8 +2,12 @@
 
 Human-approved Q&A. A strong match here is reused (lightly reframed) and marked
 source_tier=1 — ~100% correct by construction. Always tried before generation.
-Tag-scoped (§5.3). Phase 0 matches lexically; the threshold is deliberately
-conservative so only strong matches auto-reuse.
+Tag-scoped (§5.3).
+
+Matching uses two bands (F1, "propose don't decide"): only a near-exact match
+auto-reuses silently; a close-but-not-exact match is surfaced as a candidate for
+human confirmation. This prevents meaning-flipping near-misses (e.g. "encrypt at
+rest" vs "in transit") from auto-reusing the wrong approved answer at HIGH.
 """
 
 from __future__ import annotations
@@ -16,8 +20,9 @@ from pydantic import BaseModel, Field
 from .base import lexical_similarity
 from .tags import in_scope, normalize_tags
 
-# A match at/above this score is treated as the same question (auto-reuse).
-DEFAULT_MATCH_THRESHOLD = 0.62
+# Two-band matcher (F1):
+AUTO_REUSE_THRESHOLD = 0.90   # near-exact: safe to reuse silently at HIGH
+SUGGEST_THRESHOLD = 0.62      # close but not exact: surface for human confirmation
 
 
 class LibraryEntry(BaseModel):
@@ -59,9 +64,11 @@ class AnswerLibrary:
         self,
         question_text: str,
         scope_tags=None,
-        threshold: float = DEFAULT_MATCH_THRESHOLD,
+        threshold: float = SUGGEST_THRESHOLD,
     ) -> tuple[LibraryEntry, float] | None:
-        """Return the best in-scope entry and its score if >= threshold."""
+        """Return the best in-scope entry and its score if >= threshold (the
+        lower SUGGEST band). The caller decides reuse vs. suggest by comparing
+        the returned score to AUTO_REUSE_THRESHOLD."""
         best: tuple[LibraryEntry, float] | None = None
         for entry in self.entries:
             if not in_scope(entry.tags, scope_tags):

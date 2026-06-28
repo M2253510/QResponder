@@ -1,15 +1,22 @@
-# Golden evaluation set (§11). Used by `qresponder eval` (Phase 1) to measure
-# whether YOUR chosen model is good enough: retrieval Recall@K, faithfulness,
-# answer correctness (LLM-judge, calibrated to human baseline), and %flagged.
+# Golden evaluation set (§11). Used by `qresponder eval --set eval.yaml` to
+# measure whether YOUR chosen model is good enough:
+#   Recall@K  - was `expected_source` in the retrieved top-k (retrieval mode)
+#   faithfulness/groundedness rate
+#   correctness - LLM-judge coverage of `key_facts` (calibrate vs a human baseline)
+#   coverage  - % auto-answered vs % flagged, by reason
+#
+# Item schema: question, key_facts: [...], tags: [...], expected_source? (filename)
 
 - question: "Do you encrypt data at rest?"
-  expected_key_facts: ["AES-256", "encrypted at rest"]
+  key_facts: ["AES-256", "encrypted at rest"]
   tags: [soc2, encryption]
+  expected_source: "policy_encryption.md"
 
 - question: "Is MFA required for employees?"
-  expected_key_facts: ["MFA enforced", "all employees"]
+  key_facts: ["MFA enforced", "all employees"]
   tags: [soc2, access-control]
+  expected_source: "policy_access_control.md"
 
 - question: "What is your data retention period for backups?"
-  expected_key_facts: []   # intentionally unsupported by the sample KB -> should flag NEEDS_REVIEW
+  key_facts: []   # intentionally unsupported -> should flag NEEDS_REVIEW
   tags: [soc2]

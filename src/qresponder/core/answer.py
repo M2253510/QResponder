@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import logging
 
+from ..kb.base import snippet_supported
 from ..llm.base import LLMProvider
 from ..llm import prompts
 from ..models import (
@@ -30,7 +31,7 @@ log = logging.getLogger("qresponder.answer")
 _VALID_REASONS = {r.value for r in ReviewReason}
 
 
-def _coerce_result(raw: dict, q: dict) -> AnswerResult:
+def _coerce_result(raw: dict, q: dict, kb_context: str) -> AnswerResult:
     qid = str(raw.get("question_id") or q.get("question_id") or "")
     qtext = q.get("question_text", "")
     atype = str(raw.get("answer_type", q.get("answer_type", "unknown"))).lower()
@@ -43,6 +44,13 @@ def _coerce_result(raw: dict, q: dict) -> AnswerResult:
             citations.append(
                 Citation(source=str(c.get("source", "knowledge-base")), snippet=str(c["snippet"]))
             )
+
+    # GUARDRAIL (F2): drop citations whose snippet is not actually drawn from the
+    # supplied KB context — a model can emit a plausible-but-absent snippet. The
+    # empty-citations case below then downgrades the result. Generated path only;
+    # Tier-1 results never pass through here (their citation is the approved
+    # answer itself), consistent with F5.
+    citations = [c for c in citations if snippet_supported(c.snippet, kb_context)]
 
     status_raw = str(raw.get("status", "needs_review")).lower()
     status = Status.ANSWERED if status_raw == "answered" else Status.NEEDS_REVIEW
@@ -143,5 +151,5 @@ def answer_batch(
             # Model dropped a question — flag rather than fabricate.
             results.extend(_parse_error_results([q]))
         else:
-            results.append(_coerce_result(raw, q))
+            results.append(_coerce_result(raw, q, kb_context))
     return results

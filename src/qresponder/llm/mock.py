@@ -65,8 +65,67 @@ class MockProvider:
             return self._mock_extract(user)
         if system.startswith("Answer STRICTLY"):
             return self._mock_answer(user)
+        if system.startswith("You are a strict faithfulness verifier"):
+            return self._mock_faithfulness(user)
+        if system.startswith("You are grading answers"):
+            return self._mock_correctness(user)
         # doctor preflight uses a tiny JSON echo request.
         return '{"ok": true}'
+
+    # --- eval correctness ------------------------------------------------
+    def _mock_correctness(self, user: str) -> str:
+        """A key fact is 'covered' if its content words appear in the answer."""
+        try:
+            start, end = user.find("["), user.rfind("]")
+            items = json.loads(user[start : end + 1]) if start != -1 else []
+        except (json.JSONDecodeError, ValueError):
+            items = []
+        out = []
+        for it in items:
+            answer_lower = str(it.get("answer", "")).lower()
+            covered, missing = [], []
+            for fact in it.get("key_facts") or []:
+                fact_words = _content_words(str(fact))
+                if fact_words and all(w in answer_lower for w in fact_words):
+                    covered.append(fact)
+                else:
+                    missing.append(fact)
+            out.append({"id": str(it.get("id", "")), "covered_facts": covered, "missing_facts": missing})
+        return json.dumps(out)
+
+    # --- faithfulness ----------------------------------------------------
+    def _mock_faithfulness(self, user: str) -> str:
+        """Honest verdict for the mock's own answers: a claim is faithful when
+        its words actually appear in the cited snippets (which the mock answerer
+        guarantees, since it answers WITH a snippet). This keeps the mock truthful
+        rather than rubber-stamping."""
+        items = []
+        try:
+            start, end = user.find("["), user.rfind("]")
+            items = json.loads(user[start : end + 1]) if start != -1 else []
+        except (json.JSONDecodeError, ValueError):
+            items = []
+        out = []
+        for it in items:
+            answer = str(it.get("answer", ""))
+            snippets = " ".join(str(s) for s in (it.get("snippets") or []))
+            snip_lower = snippets.lower()
+            claim_words = _content_words(answer)
+            # Faithful if the answer's content words are largely present in the
+            # cited snippets (entailment proxy).
+            if not claim_words:
+                faithful = bool(snippets)
+            else:
+                present = sum(1 for w in claim_words if w in snip_lower)
+                faithful = present / len(claim_words) >= 0.5
+            out.append(
+                {
+                    "id": str(it.get("id", "")),
+                    "faithful": faithful,
+                    "unsupported_claims": [] if faithful else ["answer not entailed by snippets"],
+                }
+            )
+        return json.dumps(out)
 
     # --- extraction ------------------------------------------------------
     def _mock_extract(self, user: str) -> str:

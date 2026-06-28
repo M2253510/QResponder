@@ -38,6 +38,7 @@ def _split_paragraphs(text: str) -> list[str]:
 class InContextKB:
     def __init__(self, chunks: list[KBChunk] | None = None):
         self.chunks: list[KBChunk] = chunks or []
+        self._context_cache: dict[tuple, str] = {}
 
     @classmethod
     def load(cls, kb_dir: str | Path | None) -> "InContextKB":
@@ -82,3 +83,12 @@ class InContextKB:
                 max_chars,
             )
         return "\n\n".join(lines)
+
+    def context_for(self, query: str, scope_tags=None, max_chars: int = 150_000) -> str:
+        """Uniform context seam (B1). In-context mode ignores the query and
+        returns the cached global assembled context for the given scope, so
+        orchestration can treat in-context and retrieval KBs the same way."""
+        key = (tuple(scope_tags) if scope_tags else (), max_chars)
+        if key not in self._context_cache:
+            self._context_cache[key] = self.assemble_context(scope_tags, max_chars)
+        return self._context_cache[key]

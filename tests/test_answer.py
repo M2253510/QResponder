@@ -10,7 +10,7 @@ from qresponder.config import Config
 from qresponder.core.answer import answer_batch
 from qresponder.core.orchestrate import orchestrate
 from qresponder.kb.in_context import InContextKB
-from qresponder.kb.library import AnswerLibrary
+from qresponder.kb.library import AnswerLibrary, LibraryEntry
 from qresponder.llm import prompts
 from qresponder.llm.mock import MockProvider
 from qresponder.models import AnswerType, Confidence, Question, ReviewReason, Status
@@ -27,6 +27,36 @@ def test_answer_batch_downgrades_answered_without_citation():
     res = answer_batch(bad, "ctx", [{"question_id": "q1", "question_text": "Q?", "answer_type": "yes_no"}])
     assert res[0].status == Status.NEEDS_REVIEW
     assert res[0].review_reason == ReviewReason.UNSUPPORTED
+
+
+def test_answer_batch_rejects_fabricated_citation():
+    """F2: an answered result citing a snippet absent from the KB context is
+    downgraded (the fabricated citation is dropped, leaving no citation)."""
+    context = "All data at rest is encrypted using AES-256 with keys in KMS."
+    bad = MockProvider(
+        responses=['[{"question_id":"q1","answer":"We hold ISO 27001 certification.",'
+                   '"answer_type":"text","citations":[{"source":"kb",'
+                   '"snippet":"We are ISO 27001 certified since 2019 by BSI."}],'
+                   '"status":"answered","confidence":"high"}]']
+    )
+    res = answer_batch(bad, context, [{"question_id": "q1", "question_text": "Q?", "answer_type": "text"}])
+    assert res[0].status == Status.NEEDS_REVIEW
+    assert res[0].review_reason == ReviewReason.UNSUPPORTED
+    assert not res[0].citations
+
+
+def test_answer_batch_keeps_supported_citation():
+    """A citation whose snippet IS in the context stays ANSWERED."""
+    context = "All data at rest is encrypted using AES-256 with keys in KMS."
+    good = MockProvider(
+        responses=['[{"question_id":"q1","answer":"Yes, AES-256 at rest.",'
+                   '"answer_type":"yes_no","citations":[{"source":"kb",'
+                   '"snippet":"All data at rest is encrypted using AES-256"}],'
+                   '"status":"answered","confidence":"high"}]']
+    )
+    res = answer_batch(good, context, [{"question_id": "q1", "question_text": "Q?", "answer_type": "yes_no"}])
+    assert res[0].status == Status.ANSWERED
+    assert res[0].citations
 
 
 def test_answer_batch_parse_error_flags_review():
@@ -74,6 +104,46 @@ def test_orchestrate_full_flow():
 
     # Order preserved.
     assert [r.question_id for r in results] == ["q1", "q2", "q3", "q4"]
+
+
+def test_library_band_split_blocks_meaning_flip(tmp_path):
+    """F1: a meaning-flipping near-miss must NOT auto-reuse at HIGH; it is
+    surfaced as a LIBRARY_CANDIDATE for human confirmation. A near-exact match
+    still auto-reuses."""
+    cfg = Config(llm_provider="mock")
+    provider = MockProvider()
+    library = AnswerLibrary(
+        [
+            LibraryEntry(
+                question="Do you encrypt data at rest?",
+                answer="Yes. Data at rest is encrypted with AES-256.",
+                tags=["soc2", "encryption"],
+                approved_by="security-team",
+            )
+        ]
+    )
+    kb = InContextKB.load(FIX / "kb")
+
+    questions = [
+        # Near-miss: "in transit" flips the meaning of the at-rest entry.
+        Question(id="q1", text="Do you encrypt data in transit?", answer_type=AnswerType.YES_NO),
+        # Near-exact: same question -> safe to auto-reuse.
+        Question(id="q2", text="Do you encrypt data at rest?", answer_type=AnswerType.YES_NO),
+    ]
+    results = {r.question_id: r for r in orchestrate(questions, provider, library, kb, cfg)}
+
+    # q1: NOT answered/HIGH — surfaced for confirmation.
+    assert results["q1"].status == Status.NEEDS_REVIEW
+    assert results["q1"].review_reason == ReviewReason.LIBRARY_CANDIDATE
+    assert results["q1"].confidence == Confidence.LOW
+    assert results["q1"].source_tier == 1
+    assert results["q1"].answer  # proposed reuse is shown to the human
+    assert results["q1"].missing_info and "confirm" in results["q1"].missing_info.lower()
+
+    # q2: near-exact -> auto-reuse at HIGH.
+    assert results["q2"].status == Status.ANSWERED
+    assert results["q2"].confidence == Confidence.HIGH
+    assert results["q2"].source_tier == 1
 
 
 def test_every_answered_has_citation_invariant():

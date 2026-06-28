@@ -96,10 +96,10 @@ def answer(
         cfg.batch_size = batch_size
     if cfg.kb_mode == "retrieval":
         typer.secho(
-            "Note: retrieval mode is a Phase 1 feature; running in_context for now.",
+            "Retrieval mode: hybrid BM25+dense + RRF + cross-encoder rerank "
+            "(local models download on first run).",
             fg=typer.colors.YELLOW,
         )
-        cfg.kb_mode = "in_context"
 
     scope = parse_tags(tags)
     result = run_pipeline(questionnaire, kb, qa, cfg, scope_tags=scope)
@@ -140,14 +140,21 @@ def extract(
 @app.command()
 def eval(  # noqa: A001 - intentional command name
     set_path: str = typer.Option("eval.yaml", "--set", help="Golden eval YAML"),
+    kb: str = typer.Option(None, "--kb", help="Knowledge base directory"),
+    qa: str = typer.Option(None, "--qa", help="Answer Library YAML (Tier 1)"),
+    mode: str = typer.Option(None, "--mode", help="in_context | retrieval (overrides config)"),
+    config_path: str = typer.Option("config.yaml", "--config"),
+    verbose: bool = typer.Option(False, "--verbose", "-v"),
 ):
-    """Measure your model on a golden set (Phase 1)."""
-    typer.secho(
-        "`eval` is a Phase 1 feature (Recall@K, faithfulness, %flagged). "
-        "Not yet implemented in this Phase 0 build.",
-        fg=typer.colors.YELLOW,
-    )
-    raise typer.Exit(code=0)
+    """Measure your model on a golden set: Recall@K, faithfulness, correctness, coverage."""
+    _setup_logging(verbose)
+    from .eval.runner import format_report, run_eval
+
+    cfg = load_config(config_path)
+    if mode:
+        cfg.kb_mode = mode
+    report = run_eval(set_path, kb, qa, cfg)
+    typer.echo(format_report(report))
 
 
 _INIT_FILES = {

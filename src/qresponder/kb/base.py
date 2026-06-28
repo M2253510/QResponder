@@ -41,3 +41,22 @@ def lexical_similarity(a: str, b: str) -> float:
     jaccard = len(ta & tb) / len(ta | tb)
     ratio = SequenceMatcher(None, a.lower(), b.lower()).ratio()
     return (jaccard + ratio) / 2.0
+
+
+def snippet_supported(snippet: str, context: str, min_overlap: float = 0.6) -> bool:
+    """True if the snippet is plausibly drawn from context (F2).
+
+    A normalized substring, or >= min_overlap of its content tokens present in
+    the context. A cheap, no-model guard against a model citing a
+    plausible-but-absent snippet (the fabricated-citation failure class).
+    """
+    norm = lambda s: re.sub(r"\s+", " ", s.lower()).strip()  # noqa: E731
+    ns, nc = norm(snippet), norm(context)
+    if not ns:
+        return False
+    if ns in nc:
+        return True
+    toks = [w for w in _tokens(snippet) if len(w) > 2]
+    if not toks:
+        return False
+    return sum(1 for w in toks if w in nc) / len(toks) >= min_overlap
