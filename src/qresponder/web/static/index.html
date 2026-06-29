@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>QRESPONDER — review</title>
+  <!-- All assets local. No CDN, no external fonts, no telemetry. -->
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">QRESPONDER<span class="brand-sub">security questionnaire review</span></div>
+    <div id="provider" class="provider" title="Active model (server-side; keys never reach this page)">—</div>
+  </header>
+
+  <main id="main">
+    <!-- New Run -->
+    <section id="new-run" class="card">
+      <h1>New run</h1>
+      <p class="muted">Draft grounded, cited answers from your own knowledge base. Nothing is submitted — you review every answer, and each accept trains your Answer Library.</p>
+      <form id="run-form" class="form">
+        <label>Questionnaire file
+          <input type="file" id="f-file" accept=".xlsx,.xlsm,.docx,.pdf" required />
+        </label>
+        <label>Knowledge base directory (server path)
+          <input type="text" id="f-kb" placeholder="./kb" />
+        </label>
+        <label>Evidence vault directory (optional, for attachments)
+          <input type="text" id="f-evidence" placeholder="./evidence" />
+        </label>
+        <label>Answer Library (qa.yaml — trained on accept)
+          <input type="text" id="f-qa" placeholder="./qa.yaml" />
+        </label>
+        <div class="row">
+          <label>Tags (comma-separated)
+            <input type="text" id="f-tags" placeholder="soc2,hipaa" />
+          </label>
+          <label>Mode
+            <select id="f-mode">
+              <option value="in_context">in-context</option>
+              <option value="retrieval">retrieval</option>
+            </select>
+          </label>
+        </div>
+        <button type="submit" class="btn primary">Run</button>
+      </form>
+      <div id="run-progress" class="progress hidden">
+        <span class="spinner"></span> <span id="run-progress-text">Starting…</span>
+      </div>
+      <div id="run-error" class="error hidden"></div>
+    </section>
+
+    <!-- Review queue -->
+    <section id="review" class="hidden">
+      <div id="summary" class="summary"></div>
+      <div id="items"></div>
+      <div class="export-bar">
+        <button id="export-btn" class="btn primary">Export draft</button>
+        <div id="export-result" class="export-result"></div>
+      </div>
+      <p class="muted footer-note">Output is a <strong>draft</strong>. Nothing is submitted.</p>
+    </section>
+  </main>
+
+  <script src="/app.js"></script>
+</body>
+</html>

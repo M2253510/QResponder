@@ -22,6 +22,26 @@ services:
       - ./:/data           # mount your questionnaires, kb, qa.yaml, output here
     working_dir: /data
 
+  # Local web review UI (opt-in). Build includes the `web` extra (FastAPI/uvicorn).
+  #   docker compose --profile web up web    # then open http://127.0.0.1:8000
+  # The port is mapped to the host's LOOPBACK only (127.0.0.1). The UI has NO AUTH
+  # and handles your security posture — do NOT change this to 0.0.0.0:8000 or
+  # publish it on a network without putting authentication / a reverse proxy in
+  # front first.
+  web:
+    build:
+      context: .
+      args:
+        EXTRAS: anthropic,openai,web
+    image: qresponder:web
+    profiles: ["web"]
+    env_file: [.env]
+    volumes: ["./:/data"]
+    working_dir: /data
+    command: ["serve", "--host", "0.0.0.0", "--port", "8000"]  # 0.0.0.0 is the container's interface
+    ports:
+      - "127.0.0.1:8000:8000"  # reachable only from the host's localhost
+
   # Retrieval-capable profile (opt-in): builds with the retrieval extra so
   # `qresponder answer --mode retrieval` works in-container.
   #   docker compose --profile retrieval run --rm app-retrieval doctor --retrieval

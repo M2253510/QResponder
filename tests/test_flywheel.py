@@ -4,7 +4,7 @@ from pathlib import Path
 
 import yaml
 
-from qresponder.core.flywheel import approve
+from qresponder.core.flywheel import approve, approve_one
 from qresponder.kb.library import AnswerLibrary
 from qresponder.models import (
     AnswerResult,
@@ -70,6 +70,26 @@ def test_reapprove_bumps_version_and_updates(tmp_path):
     e = lib.entries[0]
     assert e.version == 2
     assert e.answer == "Yes, AES-256 with KMS rotation."
+    assert e.approved_by == "bob"
+    assert "soc2" in e.tags and "kms" in e.tags
+
+
+def test_approve_one_adds_then_updates(tmp_path):
+    qa = tmp_path / "qa.yaml"
+    r1 = approve_one("Do you encrypt data at rest?", "Yes, AES-256.", qa, approved_by="alice", tags=["soc2"])
+    assert r1["action"] == "added"
+    assert r1["version"] == 1
+    assert r1["total"] == 1
+
+    # Same question, edited answer -> update + version bump (no duplicate).
+    r2 = approve_one("Do you encrypt data at rest?", "Yes, AES-256 with KMS.", qa, approved_by="bob", tags=["kms"])
+    assert r2["action"] == "updated"
+    assert r2["version"] == 2
+    assert r2["total"] == 1
+
+    lib = AnswerLibrary.load(qa)
+    e = lib.entries[0]
+    assert e.answer == "Yes, AES-256 with KMS."
     assert e.approved_by == "bob"
     assert "soc2" in e.tags and "kms" in e.tags
 

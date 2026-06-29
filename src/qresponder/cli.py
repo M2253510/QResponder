@@ -199,6 +199,37 @@ def approve(
     )
 
 
+@app.command()
+def serve(
+    host: str = typer.Option("127.0.0.1", "--host", help="Bind address (default localhost)"),
+    port: int = typer.Option(8000, "--port", help="Port"),
+    config_path: str = typer.Option("config.yaml", "--config"),
+):
+    """Launch the local web review UI (FastAPI). Defaults to 127.0.0.1."""
+    cfg = load_config(config_path)
+    try:
+        import uvicorn
+
+        from .web.app import create_app
+    except ImportError:
+        typer.secho(
+            'The web UI needs extra deps. Install with: pip install "qresponder[web]"',
+            fg=typer.colors.RED,
+        )
+        raise typer.Exit(code=1)
+
+    if host not in ("127.0.0.1", "localhost"):
+        typer.secho(
+            f"WARNING: binding {host} exposes the UI beyond localhost. It has NO AUTH "
+            "and handles your security posture — put auth/a reverse proxy in front first.",
+            fg=typer.colors.YELLOW,
+        )
+    model = cfg.anthropic_model if cfg.llm_provider == "anthropic" else cfg.llm_model
+    typer.secho(f"QRESPONDER review UI — provider: {cfg.llm_provider} ({model})", fg=typer.colors.GREEN)
+    typer.echo(f"  http://{host}:{port}  (keys stay server-side; nothing leaves this host)")
+    uvicorn.run(create_app(cfg), host=host, port=port, log_level="info")
+
+
 _INIT_FILES = {
     ".env": """LLM_PROVIDER=anthropic
 ANTHROPIC_API_KEY=

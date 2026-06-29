@@ -22,10 +22,12 @@ coverage.xml
 # Tooling
 .mypy_cache/
 .ruff_cache/
+.claude/
 
 # Output artifacts
 out/
 demo_out/
+web_runs/
 *.local.yaml
 
 # OS

@@ -67,50 +67,74 @@ def _safe_write_yaml(path: Path, rows: list[dict]) -> None:
             os.remove(tmp)
 
 
+def _apply_to_library(library: AnswerLibrary, question: str, answer: str, approved_by, tags) -> str:
+    """Add or update one entry in an already-loaded library (no I/O).
+    Returns 'added' or 'updated'. Dedup at the auto-reuse band."""
+    question = question.strip()
+    answer = answer.strip()
+    existing = None
+    for e in library.entries:
+        if lexical_similarity(question, e.question) >= AUTO_REUSE_THRESHOLD:
+            existing = e
+            break
+    if existing is not None:
+        existing.answer = answer
+        existing.version += 1
+        if tags:
+            existing.tags = sorted(set(existing.tags) | set(tags))
+        if approved_by:
+            existing.approved_by = approved_by
+        return "updated"
+    library.entries.append(
+        LibraryEntry(question=question, answer=answer, tags=tags, approved_by=approved_by, version=1)
+    )
+    return "added"
+
+
+def approve_one(
+    question: str,
+    answer: str,
+    qa_path: str | Path,
+    approved_by: str | None = None,
+    tags=None,
+) -> dict:
+    """Approve a single (question, answer) into the Answer Library — the unit
+    both the CLI batch approve and the web per-item accept share. Dedup at the
+    0.90 band, version-bump on match, atomic write. Returns
+    {action, version, total}."""
+    library = AnswerLibrary.load(qa_path)  # empty if the file doesn't exist yet
+    norm_tags = normalize_tags(tags)
+    action = _apply_to_library(library, question, answer, approved_by, norm_tags)
+    _safe_write_yaml(Path(qa_path), _entries_to_dicts(library.entries))
+    # Report the resulting version of the matching entry.
+    version = next(
+        (e.version for e in library.entries
+         if lexical_similarity(question.strip(), e.question) >= AUTO_REUSE_THRESHOLD),
+        1,
+    )
+    return {"action": action, "version": version, "total": len(library.entries)}
+
+
 def approve(
     results_path: str | Path,
     qa_path: str | Path,
     approved_by: str | None = None,
     extra_tags=None,
 ) -> dict:
-    """Append accepted answers to the Answer Library, de-duped + versioned."""
+    """Append accepted answers to the Answer Library, de-duped + versioned.
+
+    Batch path (CLI). Loads once, applies all accepted items, writes once."""
     result = QuestionnaireResult.model_validate_json(
         Path(results_path).read_text(encoding="utf-8")
     )
-    library = AnswerLibrary.load(qa_path)  # empty if the file doesn't exist yet
+    library = AnswerLibrary.load(qa_path)
     tags = normalize_tags(extra_tags)
 
     added = updated = 0
     for r in _accepted(result):
-        question = r.question_text.strip()
-        answer = r.answer.strip()
-
-        # Dedup at the auto-reuse band: same question -> update + bump version.
-        existing = None
-        for e in library.entries:
-            if lexical_similarity(question, e.question) >= AUTO_REUSE_THRESHOLD:
-                existing = e
-                break
-
-        if existing is not None:
-            existing.answer = answer
-            existing.version += 1
-            if tags:
-                existing.tags = sorted(set(existing.tags) | set(tags))
-            if approved_by:
-                existing.approved_by = approved_by
-            updated += 1
-        else:
-            library.entries.append(
-                LibraryEntry(
-                    question=question,
-                    answer=answer,
-                    tags=tags,
-                    approved_by=approved_by,
-                    version=1,
-                )
-            )
-            added += 1
+        action = _apply_to_library(library, r.question_text, r.answer, approved_by, tags)
+        added += action == "added"
+        updated += action == "updated"
 
     _safe_write_yaml(Path(qa_path), _entries_to_dicts(library.entries))
     log.info("Flywheel: %d added, %d updated; library now %d entries", added, updated, len(library.entries))

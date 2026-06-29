@@ -4,6 +4,19 @@ All notable changes to QRESPONDER. Format based on
 [Keep a Changelog](https://keepachangelog.com/); this project uses semantic
 versioning.
 
+## [Unreleased]
+
+### Added
+- **Local web review UI (Phase 4)** — `qresponder serve` launches a FastAPI app
+  (vanilla HTML/CSS/JS, no build, no CDN, no telemetry; binds 127.0.0.1, no
+  keys in the browser). Upload → run → review queue (confidence chips, citations,
+  per-reason panels: interpretation picker, attachment confirm, library-candidate
+  accept/reject, conflict reconcile) → export. **Every accept/edit trains the
+  Answer Library via the flywheel**; edits train on the edited text; re-accepting
+  is idempotent. New `web` extra; FastAPI/uvicorn lazy-imported.
+- `core.flywheel.approve_one` — single-entry flywheel shared by the CLI batch
+  `approve` and the web per-item accept.
+
 ## [0.1.0] — 2026-06-29
 
 First release. Local-first, bring-your-own-model security-questionnaire

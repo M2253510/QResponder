@@ -16,8 +16,9 @@ contradiction — so QRESPONDER doesn't.
 > faithfulness/citation verification, eval harness. Phase 2: ambiguity surfacing,
 > attachment resolution, format-perfect write-back, approve-back flywheel.
 > Phase 3: cross-source conflict detection + launch hardening (golden eval, CI,
-> demo). Two-adapter BYOM, `doctor` preflight, CLI, Docker, **70 tests, all
-> offline**. Recommended next: a minimal local web review UI.
+> demo). Phase 4: a local web review UI (`qresponder serve`) where every
+> accept/edit trains the Answer Library. Two-adapter BYOM, `doctor` preflight,
+> CLI, Docker, **77 tests, all offline**.
 
 ## Why it's honest by construction
 
@@ -44,6 +45,42 @@ qresponder answer \
 
 Outputs land in `./out`: `answered.xlsx`, `results.json`, and a human-first
 `review.md` (NEEDS_REVIEW + LOW-confidence items first, grouped by reason).
+
+## Web review UI
+
+Prefer a UI? Launch the local review app:
+
+```bash
+pip install -e ".[web]"     # FastAPI + uvicorn (or build the web Docker image)
+qresponder serve            # → http://127.0.0.1:8000
+```
+
+> _Record the demo: run `qresponder serve`, do one run, and capture the review
+> screen → `docs/review-ui.png`. (Not committed — it's a per-environment asset.)_
+
+**The review loop (this is the product):**
+1. **New run** — upload the questionnaire; point at your `kb`, optional
+   `evidence` vault, and `qa.yaml` Answer Library; set tags/mode. The active
+   provider/model is shown read-only — **your API key never reaches the browser.**
+2. **Review queue** — each answer shows a confidence chip (green/amber/red), a
+   status/reason badge, and expandable citations. Flagged items get the right
+   panel: an **interpretation picker** (ambiguous), an **attachment confirm**
+   (evidence files), a **library-candidate** accept/reject, or a **conflict**
+   side-by-side to reconcile.
+3. **Accept / Edit + Accept** — and here's the flywheel: **every accept trains
+   your Answer Library**, and an *edited* answer trains on the edited text, not
+   the draft. The item shows an "added to library" badge. Coverage compounds with
+   use, independent of the model.
+4. **Export** — writes `answered.xlsx` + `results.json` + `review.md` and fills a
+   copy of your original template (falling back if it has embedded media).
+   Nothing is auto-submitted — the human gate is the whole point.
+
+**Security note:** the UI binds **`127.0.0.1` by default and has no auth** — it
+handles your security posture, so don't expose it on a network without putting
+authentication / a reverse proxy in front first. `--host`/`--port` override the
+bind (you'll get a warning if you bind beyond localhost). Like the rest of the
+local path, the page loads **zero external assets** (no CDN, no web fonts) and
+sends no telemetry.
 
 ## The two connection paths
 
@@ -242,6 +279,7 @@ qresponder answer --questionnaire f.xlsx --kb ./kb [--qa qa.yaml] [--tags hipaa,
 qresponder extract --questionnaire f.xlsx        # debug: dump extracted questions
 qresponder eval --set eval.yaml [--kb ./kb] [--qa qa.yaml] [--mode retrieval]
 qresponder approve --results out/results.json --qa qa.yaml [--by NAME] [--tags ...]
+qresponder serve [--host 127.0.0.1] [--port 8000]   # local web review UI
 qresponder init                                  # scaffold .env / config / qa / eval
 ```
 
@@ -267,10 +305,10 @@ tag-scoped so GDPR questions don't pull SOC 2 evidence.
 - **Phase 2** — ambiguity/interpretation surfacing; attachment resolution;
   format-perfect write-back; approved-answer flywheel. ✅
 - **Phase 3** — cross-source conflict detection + launch hardening (golden eval,
-  CI, demo, docs). ✅ The engine is now feature-complete.
-- **Next (recommended)** — a minimal local web review UI (upload → run → review
-  queue with accept/edit/pick-interpretation/confirm-attachment → export +
-  approve). The real adoption lever once the engine is complete.
+  CI, demo, docs). ✅
+- **Phase 4** — local web review UI (`qresponder serve`): upload → run → review
+  queue with accept/edit/pick-interpretation/confirm-attachment/reconcile-conflict
+  → export, with every accept training the Answer Library. ✅
 
 **Deliberately out of scope** (with rationale): Tier-4 prior-submission mining
 (the flywheel already promotes accepted answers to higher-authority Tier-1);
