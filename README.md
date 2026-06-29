@@ -303,8 +303,11 @@ template (`<name>.answered.xlsx`/`.docx`), never the original:
 qresponder answer -q f.xlsx --kb ./kb --writeback
 ```
 
-It writes to the top-left cell of merged ranges, sets values only (preserving
-shared styles **and data validations / dropdowns** — a dropdown answer is even
+Unresolved (`NEEDS_REVIEW`) cells are filled with a visible marker
+(`⚠ NEEDS REVIEW: <reason>`, configurable; toggle with `--no-review-markers`)
+instead of left blank, so they're impossible to miss on a 200-row sheet —
+ANSWERED cells are never marked. It writes to the top-left cell of merged ranges,
+sets values only (preserving shared styles **and data validations / dropdowns** — a dropdown answer is even
 coerced to its allowed option, e.g. a verbose "Yes…" becomes `Yes`), and —
 because openpyxl can drop embedded images/charts on save —
 **falls back to the separate `answered.xlsx` rather than risk stripping your

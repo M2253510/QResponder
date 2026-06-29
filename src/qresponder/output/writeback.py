@@ -27,13 +27,18 @@ log = logging.getLogger("qresponder.writeback")
 _ANSWER_HEADER_RE = re.compile(r"\b(answer|response|comment|comments|reply)\b", re.IGNORECASE)
 
 
-def _cell_value(r) -> str | None:
-    """The value to write, or None to skip (don't overwrite with nothing)."""
-    if r.status != Status.ANSWERED:
-        return None
-    if r.attachment_path:
-        return r.answer or Path(r.attachment_path).name
-    return r.answer or None
+def _cell_value(r, review_markers: bool = True) -> str | None:
+    """The value to write, or None to skip. ANSWERED → the answer; NEEDS_REVIEW →
+    a visible marker (Phase 7 C) so unresolved cells aren't silently blank."""
+    if r.status == Status.ANSWERED:
+        if r.attachment_path:
+            return r.answer or Path(r.attachment_path).name
+        return r.answer or None
+    if review_markers:
+        from .writer import review_marker
+
+        return review_marker(r)
+    return None  # markers off → leave NEEDS_REVIEW blank (legacy behavior)
 
 
 # --- xlsx --------------------------------------------------------------------
@@ -138,7 +143,8 @@ def _coerce_to_validation(ws, coord: str, value: str) -> str:
     return value
 
 
-def _writeback_xlsx(result: QuestionnaireResult, original_path: Path, out_path: Path) -> dict:
+def _writeback_xlsx(result: QuestionnaireResult, original_path: Path, out_path: Path,
+                    review_markers: bool = True) -> dict:
     import openpyxl
     from openpyxl.cell.cell import MergedCell
 
@@ -154,7 +160,7 @@ def _writeback_xlsx(result: QuestionnaireResult, original_path: Path, out_path: 
 
     written = 0
     for r in result.results:
-        value = _cell_value(r)
+        value = _cell_value(r, review_markers=review_markers)
         if value is None:
             continue
         target = _resolve_xlsx_target(wb, r)
@@ -164,6 +170,10 @@ def _writeback_xlsx(result: QuestionnaireResult, original_path: Path, out_path: 
         coord = _merged_anchor(ws, coord)  # never write to a non-anchor merged cell
         cell = ws[coord]
         if isinstance(cell, MergedCell):  # defensive: anchor resolution failed
+            continue
+        # Universal guard: never overwrite a pre-filled cell (applies to explicit
+        # answer anchors too — markers and answers alike).
+        if cell.value not in (None, ""):
             continue
         # If the cell has a list/dropdown data-validation, write an ALLOWED value
         # when we can map to one — and never touch the validation object itself
@@ -180,7 +190,8 @@ def _writeback_xlsx(result: QuestionnaireResult, original_path: Path, out_path: 
 
 # --- docx --------------------------------------------------------------------
 
-def _writeback_docx(result: QuestionnaireResult, original_path: Path, out_path: Path) -> dict:
+def _writeback_docx(result: QuestionnaireResult, original_path: Path, out_path: Path,
+                    review_markers: bool = True) -> dict:
     import docx as _docx
 
     document = _docx.Document(str(original_path))
@@ -188,7 +199,7 @@ def _writeback_docx(result: QuestionnaireResult, original_path: Path, out_path: 
     tables = document.tables
     written = 0
     for r in result.results:
-        value = _cell_value(r)
+        value = _cell_value(r, review_markers=review_markers)
         anchor = r.answer_location_hint
         if value is None or not anchor:
             continue
@@ -214,7 +225,8 @@ def has_answer_anchors(result: QuestionnaireResult) -> bool:
     return any(r.answer_location_hint for r in result.results)
 
 
-def write_back(result: QuestionnaireResult, original_path: str, out_dir: str) -> dict:
+def write_back(result: QuestionnaireResult, original_path: str, out_dir: str,
+               review_markers: bool = True) -> dict:
     """Write answers into a COPY of the original template. Returns a status dict
     with 'written' (path or None) and 'fallback' (bool)."""
     src = Path(original_path)
@@ -224,7 +236,7 @@ def write_back(result: QuestionnaireResult, original_path: str, out_dir: str) ->
     out_path = out / f"{src.stem}.answered{ext}"
 
     if ext in {".xlsx", ".xlsm"}:
-        return _writeback_xlsx(result, src, out_path)
+        return _writeback_xlsx(result, src, out_path, review_markers=review_markers)
     if ext == ".docx":
-        return _writeback_docx(result, src, out_path)
+        return _writeback_docx(result, src, out_path, review_markers=review_markers)
     return {"written": None, "fallback": True, "reason": f"write-back unsupported for {ext}"}

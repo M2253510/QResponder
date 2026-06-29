@@ -9,6 +9,7 @@ from qresponder.models import (
     AnswerType,
     Confidence,
     QuestionnaireResult,
+    ReviewReason,
     Status,
 )
 from qresponder.output.writeback import write_back
@@ -197,6 +198,65 @@ def test_writeback_coerces_to_dropdown_option(tmp_path):
     info = write_back(result, str(orig), str(tmp_path / "out"))
     out_ws = openpyxl.load_workbook(info["written"])["Q"]
     assert out_ws["B2"].value == "Yes"  # coerced to the allowed dropdown option
+
+
+def _flagged(qid, text, anchor):
+    return AnswerResult(
+        question_id=qid, question_text=text, answer="", answer_type=AnswerType.YES_NO,
+        confidence=Confidence.LOW, status=Status.NEEDS_REVIEW,
+        review_reason=ReviewReason.UNSUPPORTED, answer_location_hint=anchor,
+        missing_info="Not supported by the KB.",
+    )
+
+
+def test_review_markers_default_and_toggle_and_safety(tmp_path):
+    """Part C: NEEDS_REVIEW cells get a visible marker by default; ANSWERED cells
+    untouched; --no-review-markers restores blank; never overwrites a filled cell."""
+    from qresponder.models import ReviewReason
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Q"
+    ws["A2"] = "Encrypt at rest?"          # answered -> filled
+    ws["A3"] = "Unsupported?"              # flagged
+    ws["A4"] = "Already filled?"           # flagged but answer cell pre-filled
+    ws["B4"] = "PRE-EXISTING"
+    orig = tmp_path / "q.xlsx"
+    wb.save(orig)
+
+    results = [
+        _answered("q1", "Encrypt at rest?", "Yes", "Q!B2"),
+        _flagged("q2", "Unsupported?", "Q!B3"),
+        _flagged("q3", "Already filled?", "Q!B4"),
+    ]
+    res = QuestionnaireResult(source_file=str(orig), results=results)
+
+    # Default: markers on.
+    info = write_back(res, str(orig), str(tmp_path / "out"))
+    ws_o = openpyxl.load_workbook(info["written"])["Q"]
+    assert ws_o["B2"].value == "Yes"                       # answered untouched
+    assert ws_o["B3"].value.startswith("⚠ NEEDS REVIEW")   # flagged marked + reason
+    assert "unsupported" in ws_o["B3"].value.lower()
+    assert ws_o["B4"].value == "PRE-EXISTING"              # never overwrote a filled cell
+
+    # Toggle off: NEEDS_REVIEW cell stays blank.
+    info2 = write_back(res, str(orig), str(tmp_path / "out2"), review_markers=False)
+    ws2 = openpyxl.load_workbook(info2["written"])["Q"]
+    assert ws2["B3"].value in (None, "")
+    assert ws2["B2"].value == "Yes"
+
+    # The original file is never modified.
+    orig_ws = openpyxl.load_workbook(orig)["Q"]
+    assert orig_ws["B3"].value in (None, "")
+
+
+def test_answered_xlsx_shows_marker(tmp_path):
+    from qresponder.output.writer import write_xlsx
+
+    res = QuestionnaireResult(source_file="q.xlsx", results=[_flagged("q1", "Unsupported?", None)])
+    p = write_xlsx(res, tmp_path / "answered.xlsx")
+    cell = openpyxl.load_workbook(p).active.cell(row=2, column=3).value
+    assert cell.startswith("⚠ NEEDS REVIEW")
 
 
 def test_writeback_docx_paragraph(tmp_path):

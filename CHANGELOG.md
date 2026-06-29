@@ -16,6 +16,10 @@ versioning.
     internal contradictions + near-duplicates (conservative; reuses the conflict
     heuristics). Read-only by default; `--merge-duplicates` version-bumps via
     approve_one and never deletes. Web endpoint per workspace.
+  - **Visible review markers** — `NEEDS_REVIEW` cells are filled with
+    `⚠ NEEDS REVIEW: <reason>` (in answered.xlsx and write-back) instead of left
+    blank; toggle with `--no-review-markers`. ANSWERED cells untouched; a new
+    universal non-empty guard means write-back never overwrites a pre-filled cell.
 - **Provably-superior phase (A–G).**
   - **A — Provable accuracy:** RAGAS-aligned eval (faithfulness, answer relevancy,
     context precision/recall, correctness) + retrieval Recall@K/MRR, a calibration

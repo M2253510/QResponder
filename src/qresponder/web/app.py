@@ -69,6 +69,7 @@ class _Job:
         self.history_path: str | None = None  # where to append on export
         self.preset: str | None = None    # answer-style preset name (Phase 7 A)
         self.style: str | None = None     # resolved preset instructions
+        self.review_markers: bool = True  # mark NEEDS_REVIEW cells on export (Phase 7 C)
 
 
 class AcceptBody(BaseModel):
@@ -386,7 +387,8 @@ def create_app(config: Config | None = None) -> FastAPI:
         from ..core.history import HistoryStore
         from ..core.presets import resolve as resolve_preset
 
-        preset_name = preset or ws.load_settings().get("preset")
+        settings = ws.load_settings()
+        preset_name = preset or settings.get("preset")
         style = resolve_preset(preset_name, ws.path)
         hist_path = ws.path / "history.yaml"
         run_id = _start_job(
@@ -395,6 +397,7 @@ def create_app(config: Config | None = None) -> FastAPI:
             history=HistoryStore(hist_path).load(), history_path=str(hist_path),
             preset=preset_name if style else None, style=style,
         )
+        jobs[run_id].review_markers = bool(settings.get("review_markers", True))
         return {"run_id": run_id, "workspace": wid}
 
     # ---- workspace batch (Part D) -----------------------------------------
@@ -512,13 +515,14 @@ def create_app(config: Config | None = None) -> FastAPI:
         job = _get_job(run_id)
         if job.result is None:
             raise HTTPException(status_code=409, detail="run not finished")
-        paths = write_all(job.result, job.out_dir)
+        paths = write_all(job.result, job.out_dir, review_markers=job.review_markers)
         artifacts = {k: Path(v).name for k, v in paths.items()}
         writeback_info = {"written": None, "fallback": False}
         if job.questionnaire_path and Path(job.questionnaire_path).suffix.lower() in {
             ".xlsx", ".xlsm", ".docx"
         } and has_answer_anchors(job.result):
-            wb = write_back(job.result, job.questionnaire_path, str(job.out_dir))
+            wb = write_back(job.result, job.questionnaire_path, str(job.out_dir),
+                            review_markers=job.review_markers)
             writeback_info = {
                 "written": Path(wb["written"]).name if wb.get("written") else None,
                 "fallback": bool(wb.get("fallback")), "reason": wb.get("reason"),

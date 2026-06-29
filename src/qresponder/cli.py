@@ -148,7 +148,7 @@ def answer(
     result = run_pipeline(questionnaire, kb, qa, cfg, scope_tags=scope, evidence_dir=evidence,
                           preset=preset if style else None, style=style)
     # Always emit the safe Phase-0/1 artifacts.
-    paths = write_all(result, out)
+    paths = write_all(result, out, review_markers=review_markers)
 
     from .models import Status
 
@@ -169,7 +169,7 @@ def answer(
     src_ext = Path(questionnaire).suffix.lower()
     do_writeback = writeback or (src_ext in {".xlsx", ".xlsm", ".docx"} and has_answer_anchors(result))
     if do_writeback:
-        wb = write_back(result, questionnaire, out)
+        wb = write_back(result, questionnaire, out, review_markers=review_markers)
         if wb.get("written"):
             typer.echo(f"  writeback: {wb['written']} ({wb.get('cells', 0)} cell(s))")
         elif wb.get("fallback"):

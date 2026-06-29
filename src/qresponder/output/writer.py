@@ -18,6 +18,17 @@ from ..models import QuestionnaireResult, Status
 _HEADERS = ["#", "Question", "Answer", "Citations", "Confidence", "Status", "Reason", "Tier"]
 _REVIEW_FILL = PatternFill(start_color="FFFFF2CC", end_color="FFFFF2CC", fill_type="solid")
 
+# Visible placeholder marker for NEEDS_REVIEW items (Phase 7 C).
+DEFAULT_REVIEW_MARKER = "⚠ NEEDS REVIEW: {reason}"
+
+
+def review_marker(result, template: str = DEFAULT_REVIEW_MARKER) -> str:
+    reason = (result.review_reason.value or "review").replace("_", " ")
+    try:
+        return template.format(reason=reason)
+    except (KeyError, IndexError, ValueError):
+        return f"⚠ NEEDS REVIEW: {reason}"
+
 
 def _citation_text(result) -> str:
     parts = []
@@ -33,7 +44,7 @@ def write_json(result: QuestionnaireResult, path: str | Path) -> Path:
     return p
 
 
-def write_xlsx(result: QuestionnaireResult, path: str | Path) -> Path:
+def write_xlsx(result: QuestionnaireResult, path: str | Path, review_markers: bool = True) -> Path:
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = "Answers"
@@ -46,7 +57,12 @@ def write_xlsx(result: QuestionnaireResult, path: str | Path) -> Path:
         row = i + 1
         ws.cell(row=row, column=1, value=i)
         ws.cell(row=row, column=2, value=r.question_text)
-        ws.cell(row=row, column=3, value=r.answer or (r.missing_info or ""))
+        if r.status == Status.NEEDS_REVIEW and review_markers:
+            extra = f" — {r.missing_info}" if r.missing_info else ""
+            answer_cell = review_marker(r) + extra
+        else:
+            answer_cell = r.answer or (r.missing_info or "")
+        ws.cell(row=row, column=3, value=answer_cell)
         ws.cell(row=row, column=4, value=_citation_text(r))
         ws.cell(row=row, column=5, value=r.confidence.value)
         ws.cell(row=row, column=6, value=r.status.value)
@@ -66,14 +82,14 @@ def write_xlsx(result: QuestionnaireResult, path: str | Path) -> Path:
     return p
 
 
-def write_all(result: QuestionnaireResult, out_dir: str | Path) -> dict[str, Path]:
+def write_all(result: QuestionnaireResult, out_dir: str | Path, review_markers: bool = True) -> dict[str, Path]:
     """Write answered.xlsx, results.json, and review.md to out_dir."""
     from .review import write_review_md
 
     d = Path(out_dir)
     d.mkdir(parents=True, exist_ok=True)
     return {
-        "xlsx": write_xlsx(result, d / "answered.xlsx"),
+        "xlsx": write_xlsx(result, d / "answered.xlsx", review_markers=review_markers),
         "json": write_json(result, d / "results.json"),
         "review": write_review_md(result, d / "review.md"),
     }
