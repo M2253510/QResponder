@@ -178,6 +178,27 @@ def _inject_special_run(client, tmp_path):
     return qa
 
 
+def test_accept_records_human_action_in_audit(tmp_path):
+    """Part B: accepting (with an edit) stamps the audit trail's human_action."""
+    qa = tmp_path / "qa.yaml"
+    client = _client(tmp_path)
+    run_id, data = _start_run(client, qa)
+    gen = next(r for r in data["results"]
+               if r["answer_type"] != "attachment" and "incident" in r["question_text"].lower())
+    qid = gen["question_id"]
+    res = client.post(f"/api/runs/{run_id}/items/{qid}/accept",
+                      json={"answer": "Edited final answer.", "approved_by": "alice"}).json()
+    ha = res["item"]["audit"]["human_action"]
+    assert ha["type"] == "edited"
+    assert ha["by"] == "alice"
+    assert ha["at"]
+    assert ha["original_answer"]  # the pre-edit draft preserved
+    # Audit endpoint emits the pack.
+    a = client.post(f"/api/runs/{run_id}/audit").json()
+    assert "audit.json" in a["artifacts"].values()
+    assert "audit.md" in a["artifacts"].values()
+
+
 def test_special_cases_resolve_via_api(tmp_path):
     client = _client(tmp_path)
     qa = _inject_special_run(client, tmp_path)

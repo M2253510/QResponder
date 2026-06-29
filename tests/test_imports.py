@@ -46,6 +46,7 @@ def test_no_top_level_retrieval_deps():
             "qresponder.eval.runner",
             "qresponder.output.writeback",
             "qresponder.output.writer",
+            "qresponder.output.audit",
         ):
             importlib.import_module(mod)
         print("IMPORT_OK")

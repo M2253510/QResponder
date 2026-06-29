@@ -234,6 +234,22 @@ calibration: HIGH 66.7%  >  MEDIUM 42.9%  >  LOW n/a   — confidence is honest
 CI runs this deterministic eval on every push, so the accuracy claims can't
 silently regress. Swap in Anthropic or a local Ollama to get *your* numbers.
 
+## Audit / evidence pack
+
+Every completed questionnaire is audit-ready evidence, not just answers. Each
+answer carries a persisted **audit trail** — the candidates retrieved, the
+snippets cited, the faithfulness verdict, the plain-English confidence rationale,
+and the human action taken (accepted / edited / picked / attached, by whom, when,
+with the pre-edit draft preserved). Export it:
+
+```
+qresponder audit --run ./out [--zip]        # → audit.json (machine) + audit.md (evidence pack)
+```
+
+`audit.md` lays out, per question, the full chain question → retrieved → cited →
+faithfulness → confidence rationale → human action. For a GRC auditor this is the
+"show me how you arrived at this answer" trail, generated for free.
+
 ## Phase 2 — the differentiators
 
 **Ambiguity review.** ~1/3 of questionnaire items are ambiguous ("describe your

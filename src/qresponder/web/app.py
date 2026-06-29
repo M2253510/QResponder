@@ -386,20 +386,24 @@ def create_app(config: Config | None = None) -> FastAPI:
         if item is None:
             raise HTTPException(status_code=404, detail="item not found")
 
+        original = item.answer  # draft, before any edit
         is_attachment = item.answer_type == AnswerType.ATTACHMENT or bool(body.attachment)
         if body.attachment:
             item.attachment_path = body.attachment
             item.answer = body.attachment
             item.answer_type = AnswerType.ATTACHMENT
             final_answer = body.attachment
+            action_type = "attached"
         elif body.interpretation:
             chosen = next((c for c in item.candidates if c.interpretation == body.interpretation), None)
             final_answer = (body.answer or (chosen.answer if chosen else "")).strip()
             if chosen is not None:
                 item.citations = chosen.citations
             item.answer = final_answer
+            action_type = "picked"
         else:
             final_answer = (body.answer if body.answer is not None else item.answer).strip()
+            action_type = "edited" if final_answer != (original or "").strip() else "accepted"
             item.answer = final_answer
 
         item.status = Status.ANSWERED
@@ -409,6 +413,18 @@ def create_app(config: Config | None = None) -> FastAPI:
             from ..models import Confidence
 
             item.confidence = Confidence.HIGH  # human-approved is the highest authority
+        # Capture the human action in the audit trail (Part B).
+        from datetime import datetime, timezone
+
+        from ..models import AuditTrail, HumanAction
+
+        if item.audit is None:
+            item.audit = AuditTrail(cited=list(item.citations))
+        item.audit.human_action = HumanAction(
+            type=action_type, by=body.approved_by,
+            at=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            original_answer=original if action_type == "edited" else None,
+        )
         _persist(job)
 
         trained = False
@@ -441,6 +457,16 @@ def create_app(config: Config | None = None) -> FastAPI:
             if writeback_info["written"]:
                 artifacts["writeback"] = writeback_info["written"]
         return {"artifacts": artifacts, "writeback": writeback_info}
+
+    @app.post("/api/runs/{run_id}/audit")
+    def audit(run_id: str):
+        from ..output.audit import write_audit
+
+        job = _get_job(run_id)
+        if job.result is None:
+            raise HTTPException(status_code=409, detail="run not finished")
+        paths = write_audit(job.result, job.out_dir)
+        return {"artifacts": {k: Path(v).name for k, v in paths.items()}}
 
     @app.get("/api/runs/{run_id}/download/{artifact}")
     def download(run_id: str, artifact: str):

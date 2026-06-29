@@ -127,7 +127,8 @@ def orchestrate(
     scope_tags=None,
     evidence=None,
 ) -> list[AnswerResult]:
-    from .confidence import decide_confidence, grounding_score
+    from ..models import AuditTrail, RetrievedCandidate
+    from .confidence import confidence_rationale, decide_confidence, grounding_score
     from .conflicts import detect_conflicts
     from .faithfulness import verify_results
     from .interpretations import answer_interpretations
@@ -136,6 +137,7 @@ def orchestrate(
     to_generate: list[Question] = []
     ambiguous_questions: list[Question] = []
     retrieval_score: dict[str, float | None] = {}
+    retrieved_map: dict[str, list] = {}  # qid -> [RetrievedCandidate] (audit, Part B)
 
     retrieval_mode = config.kb_mode == "retrieval" and hasattr(kb, "retrieve")
     shared_ctx = None
@@ -189,8 +191,13 @@ def orchestrate(
         # Per-question retrieval: each question gets its own reranked top-k
         # context. Small N — no need to force shared-context batching (§B1).
         for q in to_generate:
-            ctx, score = ctx_for(q)
-            retrieval_score[q.id] = score
+            hits = kb.retrieve(q.text, scope_tags=scope_tags)
+            ctx = "\n\n".join(f"[source: {c.source}] {c.text}" for c, _ in hits)
+            retrieval_score[q.id] = hits[0][1] if hits else None
+            retrieved_map[q.id] = [
+                RetrievedCandidate(source=c.source, snippet=c.text, score=round(float(s), 4))
+                for c, s in hits
+            ]
             for r in answer_batch(provider, ctx, [_payload(q)]):
                 results[r.question_id] = r
                 generated.append(r)
@@ -227,10 +234,37 @@ def orchestrate(
             retrieval_score=score,
             strong_threshold=threshold,
         )
+        # Audit trail (Part B): capture the evidence chain while it's live.
+        r.audit = AuditTrail(
+            retrieved=retrieved_map.get(r.question_id, []),
+            cited=list(r.citations),
+            faithfulness={
+                "passed": faithful,
+                "reason": "all cited claims entailed" if faithful else "no faithful citation",
+            },
+            confidence_rationale=confidence_rationale(
+                confidence=r.confidence, source_tier=r.source_tier,
+                faithful=faithful, retrieval_score=score, strong_threshold=threshold,
+            ),
+        )
 
     # Cross-source conflict detection (D1): compare answered results against the
     # Library and each other; flag clear contradictions for human reconciliation.
     detect_conflicts(list(results.values()), library, provider, config)
+
+    # Ensure every result (Tier-1 reuse, attachments, ambiguous) carries an audit
+    # trail for the evidence pack — capture, not new logic.
+    for r in results.values():
+        if r.audit is None:
+            r.audit = AuditTrail(
+                cited=list(r.citations),
+                faithfulness={"passed": r.source_tier == 1, "reason": (
+                    "Tier-1 approved (exempt from judge)" if r.source_tier == 1 else "not generated/verified")},
+                confidence_rationale=confidence_rationale(
+                    confidence=r.confidence, source_tier=r.source_tier,
+                    faithful=(r.source_tier == 1), retrieval_score=r.grounding_score,
+                ),
+            )
 
     log.info(
         "Orchestrated: %d tier-1 reuse, %d library-candidate, %d ambiguous, "

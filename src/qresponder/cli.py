@@ -200,6 +200,30 @@ def approve(
 
 
 @app.command()
+def audit(
+    run: str = typer.Option(..., "--run", help="A run output dir containing results.json"),
+    zip_pack: bool = typer.Option(False, "--zip", help="Bundle all artifacts into evidence_pack.zip"),
+    verbose: bool = typer.Option(False, "--verbose", "-v"),
+):
+    """Export the audit / evidence pack (audit.json + audit.md) for a run."""
+    _setup_logging(verbose)
+    from .models import QuestionnaireResult
+    from .output.audit import bundle_zip, write_audit
+
+    rp = Path(run) / "results.json"
+    if not rp.exists():
+        typer.secho(f"No results.json in {run}", fg=typer.colors.RED)
+        raise typer.Exit(code=1)
+    result = QuestionnaireResult.model_validate_json(rp.read_text(encoding="utf-8"))
+    paths = write_audit(result, run)
+    typer.secho("Evidence pack written:", fg=typer.colors.GREEN)
+    typer.echo(f"  audit.json: {paths['json']}")
+    typer.echo(f"  audit.md:   {paths['md']}")
+    if zip_pack:
+        typer.echo(f"  zip:        {bundle_zip(run)}")
+
+
+@app.command()
 def serve(
     host: str = typer.Option("127.0.0.1", "--host", help="Bind address (default localhost)"),
     port: int = typer.Option(8000, "--port", help="Port"),

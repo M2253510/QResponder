@@ -67,3 +67,25 @@ def decide_confidence(
     if faithful and is_strong_retrieval(retrieval_score, strong_threshold):
         return Confidence.HIGH
     return Confidence.MEDIUM
+
+
+def confidence_rationale(
+    *,
+    confidence: Confidence,
+    source_tier: int | None,
+    faithful: bool | None,
+    retrieval_score: float | None,
+    strong_threshold: float = DEFAULT_STRONG_RERANK_SCORE,
+) -> str:
+    """A one-line, plain-English explanation of the confidence (Part B audit)."""
+    if source_tier == 1:
+        return "HIGH — reused a human-approved Answer Library entry (Tier-1, grounded by approval)."
+    strong = is_strong_retrieval(retrieval_score, strong_threshold)
+    score = "n/a" if retrieval_score is None else f"{retrieval_score:.2f}"
+    if confidence == Confidence.HIGH:
+        return (f"HIGH — faithfulness passed and grounding is strong "
+                f"(score {score} ≥ {strong_threshold}).")
+    if confidence == Confidence.MEDIUM:
+        why = "grounding signal weak/absent" if not strong else "faithfulness not confirmed"
+        return f"MEDIUM — answered and cited, but {why} (score {score})."
+    return "LOW — flagged for review (unsupported, unfaithful, ambiguous, conflicting, or unparsed)."
