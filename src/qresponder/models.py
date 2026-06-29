@@ -41,6 +41,8 @@ class ReviewReason(str, Enum):
     ATTACHMENT_UNRESOLVED = "attachment_unresolved"
     LIBRARY_CANDIDATE = "library_candidate"
     CONFLICT = "conflict"
+    INJECTION_SUSPECTED = "injection_suspected"  # Part C
+    HISTORY_CONFLICT = "history_conflict"        # Part G1
 
 
 class Question(BaseModel):
@@ -72,6 +74,39 @@ class InterpretationOption(BaseModel):
     status: Status = Status.NEEDS_REVIEW
 
 
+class SubAnswer(BaseModel):
+    """One part of a decomposed compound question (Part G2)."""
+
+    part: str
+    answer: str
+    citations: list[Citation] = Field(default_factory=list)
+    status: Status = Status.NEEDS_REVIEW
+
+
+class RetrievedCandidate(BaseModel):
+    source: str
+    snippet: str
+    score: float | None = None
+
+
+class HumanAction(BaseModel):
+    type: str = "none"  # accepted | edited | picked | attached | none
+    by: str | None = None
+    at: str | None = None
+    original_answer: str | None = None
+
+
+class AuditTrail(BaseModel):
+    """Persisted evidence chain for one answer (Part B): what was retrieved, what
+    was cited, the faithfulness verdict, why the confidence, and the human action."""
+
+    retrieved: list[RetrievedCandidate] = Field(default_factory=list)
+    cited: list[Citation] = Field(default_factory=list)
+    faithfulness: dict = Field(default_factory=dict)  # {passed: bool, reason: str}
+    confidence_rationale: str = ""
+    human_action: HumanAction = Field(default_factory=HumanAction)
+
+
 class AnswerResult(BaseModel):
     question_id: str
     question_text: str
@@ -95,6 +130,14 @@ class AnswerResult(BaseModel):
     # Set when this answer contradicts another source (D1): a short description
     # of the conflicting source/answer the human must reconcile.
     conflict_with: str | None = None
+    # Persisted audit/evidence chain (Part B).
+    audit: AuditTrail | None = None
+    # SME routing owner for flagged items (Part E).
+    owner: str | None = None
+    # Duplicate-group link: questions answered once and applied to all (Part E).
+    group_id: str | None = None
+    # Decomposed compound-question parts (Part G2).
+    subanswers: list[SubAnswer] = Field(default_factory=list)
 
 
 class QuestionnaireResult(BaseModel):

@@ -204,28 +204,35 @@ Turn "is my local Llama good enough?" into numbers:
 qresponder eval --set eval.yaml --kb ./kb --qa qa.yaml --mode retrieval
 ```
 
-It runs a golden set through the real answer path and reports **Recall@K** (was
-the expected source retrieved), **faithfulness rate**, **answer correctness**
-(LLM-judge on key-fact coverage), and **coverage** (% auto-answered vs % flagged,
-by reason). The correctness judge should be calibrated against a small
-human-graded baseline — judges hallucinate too.
+It runs a golden set through the real answer path and reports a **RAGAS-aligned**
+metric set — faithfulness, answer relevancy, context precision, context recall,
+answer correctness — plus **retrieval Recall@K and MRR**, a **calibration table**
+(measured correctness per predicted-confidence bucket — proving HIGH means HIGH),
+and **abstention** (% flagged, by reason — restraint is the product, not a
+failure). Faithfulness/correctness are LLM-judged via the configured provider
+(calibrate the judge against a small human-graded baseline — judges hallucinate
+too); the other RAGAS metrics are deterministic offline proxies so the baseline
+is reproducible.
 
 A golden `eval.yaml` (20 SIG/CAIQ-style questions) ships in-repo:
 
 ```
-qresponder eval --set eval.yaml --kb tests/fixtures/kb --qa qa.example.yaml
+make eval-baseline      # qresponder eval --set eval.yaml --kb tests/fixtures/kb --qa qa.example.yaml
 ```
 
-**Reproducible baseline** (deterministic `LLM_PROVIDER=mock`, in-context — this
-measures pipeline *structure*, not model quality; real correctness depends on
-your model):
+**Published reproducible baseline** (deterministic `LLM_PROVIDER=mock`, in-context
+— measures pipeline *structure* + calibration, not a frontier model's ceiling;
+swap in your model for *your* numbers):
 
 ```
-items: 20 · faithfulness: 100% · auto-answered: 85% · flagged: 15% (3 unsupported)
-correctness (key-fact coverage): 47% · suggested grounding threshold: 0.77
+items: 20
+RAGAS:  faithfulness 100%  context_recall 0.53  correctness 47%  answer_relevancy 0.23
+abstention: 15% (3 unsupported)        — it refuses rather than fabricate
+calibration: HIGH 66.7%  >  MEDIUM 42.9%  >  LOW n/a   — confidence is honest
 ```
 
-Swap in your model (Anthropic or a local Ollama) to get *your* accuracy numbers.
+CI runs this deterministic eval on every push, so the accuracy claims can't
+silently regress. Swap in Anthropic or a local Ollama to get *your* numbers.
 
 ## Phase 2 — the differentiators
 

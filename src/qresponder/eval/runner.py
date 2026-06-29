@@ -21,6 +21,7 @@ from pathlib import Path
 import yaml
 
 from ..config import Config
+from ..kb.base import lexical_similarity
 from ..kb.library import AnswerLibrary
 from ..kb.tags import normalize_tags
 from ..llm.base import LLMProvider, make_provider
@@ -29,6 +30,11 @@ from ..core.orchestrate import orchestrate
 from ..core.parsing import parse_json_array
 from ..models import AnswerType, Question, Status
 from .metrics import EvalItemResult, EvalReport
+
+
+def _mean(xs):
+    xs = [x for x in xs if x is not None]
+    return (sum(xs) / len(xs)) if xs else None
 
 log = logging.getLogger("qresponder.eval")
 
@@ -94,12 +100,15 @@ def run_eval(
         expected_source = item.get("expected_source")
         key_facts = [str(f) for f in (item.get("key_facts") or [])]
 
-        # Recall@K (retrieval mode only, when an expected source is given).
+        # Recall@K + MRR (retrieval mode only, when an expected source is given).
         recall_hit = None
+        recall_rank = None
         if expected_source and hasattr(kb, "retrieve"):
             hits = kb.retrieve(qtext, scope_tags=tags)
-            sources = {c.source for c, _ in hits}
-            recall_hit = expected_source in sources
+            ordered_sources = [c.source for c, _ in hits]
+            recall_hit = expected_source in ordered_sources
+            if recall_hit:
+                recall_rank = ordered_sources.index(expected_source) + 1
 
         # Run the real answer path for this item.
         q = Question(id=f"e{i}", text=qtext, answer_type=AnswerType.TEXT)
@@ -109,6 +118,20 @@ def run_eval(
         if result.status == Status.ANSWERED and result.citations:
             faithful = all(c.faithful is True for c in result.citations)
 
+        # RAGAS-aligned deterministic proxies (offline; no judge needed).
+        answer_relevancy = None
+        context_precision = None
+        context_recall = None
+        if result.status == Status.ANSWERED and result.answer:
+            answer_relevancy = round(lexical_similarity(qtext, result.answer), 3)
+        if expected_source and result.citations:
+            hits_n = sum(1 for c in result.citations if c.source == expected_source)
+            context_precision = round(hits_n / len(result.citations), 3)
+        if key_facts and result.citations:
+            cited_blob = " ".join(c.snippet for c in result.citations).lower()
+            present = sum(1 for f in key_facts if f.lower() in cited_blob)
+            context_recall = round(present / len(key_facts), 3)
+
         ir = EvalItemResult(
             question=qtext,
             status=result.status.value,
@@ -117,7 +140,11 @@ def run_eval(
             source_tier=result.source_tier,
             answer=result.answer,
             recall_hit=recall_hit,
+            recall_rank=recall_rank,
             faithful=faithful,
+            answer_relevancy=answer_relevancy,
+            context_precision=context_precision,
+            context_recall=context_recall,
             grounding_score=result.grounding_score,
         )
         item_results.append(ir)
@@ -153,6 +180,12 @@ def run_eval(
         if recall_items
         else None
     )
+    # MRR over items with an expected source (0 contribution when not retrieved).
+    mrr = (
+        sum((1.0 / r.recall_rank) if r.recall_rank else 0.0 for r in recall_items) / len(recall_items)
+        if recall_items
+        else None
+    )
     answered = [r for r in item_results if r.status == Status.ANSWERED.value]
     faithful_items = [r for r in answered if r.faithful is not None]
     faithfulness_rate = (
@@ -161,6 +194,9 @@ def run_eval(
         else None
     )
     correctness = (sum(correctness_scores) / len(correctness_scores)) if correctness_scores else None
+    answer_relevancy = _mean([r.answer_relevancy for r in item_results])
+    context_precision = _mean([r.context_precision for r in item_results])
+    context_recall = _mean([r.context_recall for r in item_results])
 
     n_answered = len(answered)
     n_flagged = n - n_answered
@@ -172,16 +208,34 @@ def run_eval(
         "flagged_pct": round(100 * n_flagged / n, 1) if n else 0.0,
         "by_reason": dict(by_reason),
     }
+    abstention = {"rate": round(n_flagged / n, 3) if n else 0.0, "by_reason": dict(by_reason)}
+
+    # Calibration: measured correctness per predicted-confidence bucket. Proves
+    # "HIGH means HIGH" — HIGH-bucket correctness should exceed MED/LOW.
+    calibration = {}
+    for bucket in ("high", "medium", "low"):
+        scores = [r.correctness for r in answered if r.confidence == bucket and r.correctness is not None]
+        calibration[bucket] = {
+            "n": sum(1 for r in answered if r.confidence == bucket),
+            "graded": len(scores),
+            "correctness": round(sum(scores) / len(scores), 3) if scores else None,
+        }
 
     score_distribution, suggested_threshold = _score_distribution(item_results)
 
     return EvalReport(
         n_items=n,
         k=config.top_k_context,
-        recall_at_k=recall_at_k,
         faithfulness_rate=faithfulness_rate,
+        answer_relevancy=answer_relevancy,
+        context_precision=context_precision,
+        context_recall=context_recall,
         correctness=correctness,
+        recall_at_k=recall_at_k,
+        mrr=mrr,
         coverage=coverage,
+        abstention=abstention,
+        calibration=calibration,
         score_distribution=score_distribution,
         suggested_threshold=suggested_threshold,
         items=item_results,
@@ -224,20 +278,33 @@ def format_report(report: EvalReport) -> str:
     def pct(x):
         return "n/a" if x is None else f"{100 * x:.1f}%"
 
+    def num(x):
+        return "n/a" if x is None else f"{x:.3f}"
+
     lines = [
         "QRESPONDER eval",
         f"  items            : {report.n_items}",
-        f"  Recall@{report.k}         : {pct(report.recall_at_k)}",
-        f"  faithfulness     : {pct(report.faithfulness_rate)}",
-        f"  correctness      : {pct(report.correctness)}  (key-fact coverage)",
-        f"  auto-answered    : {report.coverage.get('auto_pct', 0)}%",
-        f"  flagged          : {report.coverage.get('flagged_pct', 0)}%",
+        "  RAGAS-aligned:",
+        f"    faithfulness     : {pct(report.faithfulness_rate)}",
+        f"    answer_relevancy : {num(report.answer_relevancy)}",
+        f"    context_precision: {num(report.context_precision)}",
+        f"    context_recall   : {num(report.context_recall)}",
+        f"    correctness      : {pct(report.correctness)}  (key-fact coverage)",
+        "  retrieval:",
+        f"    Recall@{report.k}        : {pct(report.recall_at_k)}",
+        f"    MRR             : {num(report.mrr)}",
+        "  abstention (restraint is the product):",
+        f"    rate            : {pct(report.abstention.get('rate'))}",
     ]
-    by_reason = report.coverage.get("by_reason", {})
-    if by_reason:
-        lines.append("  flagged by reason:")
-        for reason, count in by_reason.items():
-            lines.append(f"    - {reason}: {count}")
+    for reason, count in (report.abstention.get("by_reason") or {}).items():
+        lines.append(f"    - {reason}: {count}")
+    lines.append("  calibration (measured correctness per predicted confidence):")
+    for bucket in ("high", "medium", "low"):
+        c = (report.calibration or {}).get(bucket, {})
+        lines.append(
+            f"    {bucket:<6}: n={c.get('n', 0)} graded={c.get('graded', 0)} "
+            f"correctness={pct(c.get('correctness'))}"
+        )
 
     dist = report.score_distribution or {}
     ans, flg = dist.get("answered"), dist.get("flagged")

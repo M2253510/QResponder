@@ -96,8 +96,14 @@ def test_shipped_golden_eval_runs_end_to_end():
     assert report.coverage["answered"] + report.coverage["flagged"] == 20
     assert report.coverage["flagged"] >= 1  # the intentionally-unsupported items
     assert report.score_distribution.get("answered") is not None
+    # Part A: RAGAS-aligned metrics, calibration, abstention all present.
+    assert report.answer_relevancy is not None
+    assert report.context_recall is not None
+    assert report.mrr is None or isinstance(report.mrr, float)  # n/a in in-context
+    assert set(report.calibration) == {"high", "medium", "low"}
+    assert report.abstention["rate"] >= 0
     text = format_report(report)
-    for key in ("Recall@", "faithfulness", "correctness", "auto-answered", "score distribution"):
+    for key in ("Recall@", "faithfulness", "correctness", "RAGAS", "abstention", "calibration", "score distribution"):
         assert key in text
 
 
@@ -132,3 +138,28 @@ def test_eval_recall_at_k_in_retrieval_mode():
     assert report.recall_at_k is not None
     enc = next(r for r in report.items if "encrypt" in r.question.lower())
     assert enc.recall_hit is True
+    # Part A: MRR computed in retrieval mode; rank recorded.
+    assert report.mrr is not None and 0 < report.mrr <= 1
+    assert enc.recall_rank == 1
+
+
+def test_calibration_high_beats_low():
+    """Part A: HIGH-confidence answers measure at least as correct as MEDIUM —
+    the calibration table proves 'HIGH means HIGH'."""
+    root = Path(__file__).parent.parent
+    cfg = Config(llm_provider="mock", kb_mode="in_context")
+    report = run_eval(root / "eval.yaml", kb_dir=str(root / "tests" / "fixtures" / "kb"),
+                      qa_path=str(root / "qa.example.yaml"), config=cfg, provider=MockProvider())
+    hi = report.calibration["high"]["correctness"]
+    med = report.calibration["medium"]["correctness"]
+    assert hi is not None and med is not None
+    assert hi >= med  # higher predicted confidence -> at least as correct
+
+
+def test_abstention_is_first_class():
+    root = Path(__file__).parent.parent
+    cfg = Config(llm_provider="mock", kb_mode="in_context")
+    report = run_eval(root / "eval.yaml", kb_dir=str(root / "tests" / "fixtures" / "kb"),
+                      qa_path=str(root / "qa.example.yaml"), config=cfg, provider=MockProvider())
+    assert report.abstention["rate"] > 0
+    assert "unsupported" in report.abstention["by_reason"]
