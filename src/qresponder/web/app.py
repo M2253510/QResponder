@@ -554,6 +554,29 @@ def create_app(config: Config | None = None, model_fetch=None) -> FastAPI:
         jobs[run_id].workspace_id = wid
         return {"run_id": run_id, "workspace": wid}
 
+    # ---- Ask mode (Phase 10 A): one question, the same grounded path -------
+    @app.post("/api/workspaces/{wid}/ask")
+    def ask(wid: str, body: dict = Body(...)):
+        from ..core.pipeline import run_ask
+        from ..core.presets import resolve as resolve_preset
+
+        ws = _ws(wid)
+        cfg = ws.effective_config(config)
+        if body.get("mode"):
+            cfg.kb_mode = body["mode"]
+        question = str(body.get("question", "")).strip()
+        if not question:
+            raise HTTPException(status_code=400, detail="question is required")
+        provider_obj = _build_provider(body.get("provider"), body.get("model") or ws.load_settings().get("model"))
+        settings = ws.load_settings()
+        preset_name = body.get("preset") or settings.get("preset")
+        style = resolve_preset(preset_name, ws.path)
+        scope = parse_tags(body.get("tags")) if body.get("tags") else ws.default_tags()
+        r = run_ask(question, str(ws.kb_dir), str(ws.qa_path), cfg, scope_tags=scope,
+                    provider=provider_obj, evidence_dir=str(ws.evidence_dir),
+                    preset=preset_name if style else None, style=style)
+        return r.model_dump()
+
     # ---- workspace batch (Part D) -----------------------------------------
     @app.post("/api/workspaces/{wid}/batch")
     async def ws_batch(wid: str, files: list[UploadFile], provider: str = Form(None),

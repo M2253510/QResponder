@@ -13,11 +13,56 @@ from ..ingest.base import load_document
 from ..kb.in_context import InContextKB
 from ..kb.library import AnswerLibrary
 from ..llm.base import LLMProvider, make_provider
-from ..models import QuestionnaireResult, Status
+from ..models import AnswerResult, AnswerType, Question, QuestionnaireResult, Status
 from .extract import extract_questions
 from .orchestrate import orchestrate
 
 log = logging.getLogger("qresponder.pipeline")
+
+
+def _load_kb(kb_dir, qa_path, evidence_dir, config):
+    """Build (library, kb, evidence) the one way both the questionnaire and Ask
+    paths use — so Ask reuses the exact grounded path, not a parallel one."""
+    library = AnswerLibrary.load(qa_path)
+    if config.kb_mode == "retrieval":
+        from ..kb.retrieval import RetrievalKB
+
+        kb = RetrievalKB.load(kb_dir, config)
+    else:
+        kb = InContextKB.load(kb_dir)
+    evidence = None
+    ev_dir = evidence_dir or config.evidence_dir
+    if ev_dir:
+        from ..kb.evidence import EvidenceIndex
+
+        evidence = EvidenceIndex.load(ev_dir)
+    return library, kb, evidence
+
+
+def run_ask(
+    question_text: str,
+    kb_dir: str | None,
+    qa_path: str | None,
+    config: Config,
+    scope_tags=None,
+    provider: LLMProvider | None = None,
+    evidence_dir: str | None = None,
+    history=None,
+    preset: str | None = None,
+    style: str | None = None,
+) -> AnswerResult:
+    """Answer ONE natural-language question through the EXACT same grounded path
+    as a questionnaire (library -> retrieval -> grounded generation -> faithfulness
+    -> conflict -> abstain). Same AuditTrail semantics; no lighter path."""
+    provider = provider or make_provider(config)
+    library, kb, evidence = _load_kb(kb_dir, qa_path, evidence_dir, config)
+    q = Question(id="ask", text=question_text.strip(), answer_type=AnswerType.TEXT)
+    results = orchestrate(
+        [q], provider, library, kb, config,
+        scope_tags=scope_tags, evidence=evidence, history=history,
+        preset=preset, style=style,
+    )
+    return results[0]
 
 
 def run_pipeline(
@@ -51,20 +96,7 @@ def run_pipeline(
         questions = extract_questions(doc, provider)
         E("parsed", questions=len(questions))
 
-        library = AnswerLibrary.load(qa_path)
-        if config.kb_mode == "retrieval":
-            from ..kb.retrieval import RetrievalKB
-
-            kb = RetrievalKB.load(kb_dir, config)
-        else:
-            kb = InContextKB.load(kb_dir)
-
-        evidence = None
-        ev_dir = evidence_dir or config.evidence_dir
-        if ev_dir:
-            from ..kb.evidence import EvidenceIndex
-
-            evidence = EvidenceIndex.load(ev_dir)
+        library, kb, evidence = _load_kb(kb_dir, qa_path, evidence_dir, config)
 
         log.info("Answering %d question(s)", len(questions))
         results = orchestrate(

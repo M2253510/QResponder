@@ -352,6 +352,23 @@ conflicting source named. It's conservative (no false-positive noise), never
 auto-resolves (both sides surfaced), and never flags or overrides an approved
 Tier-1 answer.
 
+## Ask mode
+
+Ask one question, get an instant grounded answer — it's the **exact same grounded
+path** as a questionnaire (Tier-1 → hybrid retrieval+rerank → grounded generation
+→ faithfulness → abstain), run on a single item, honoring your Phase-8 provider/
+model selection:
+
+```
+qresponder ask "Do you encrypt data at rest?" --workspace acme        # or --kb ./kb
+qresponder ask "..." --provider openai --model gpt-4o --json          # full AnswerResult + audit
+```
+
+You get the answer, citations (source + snippet), an explainable confidence, and
+the full audit trail. Unsupported → it abstains (`NEEDS_REVIEW` + what's missing),
+never fabricates. Web: an **Ask** box per workspace (`POST …/ask`), key stays
+server-side.
+
 ## Cross-file flagged resolve
 
 When the same unresolved question appears across many files, the **Flagged** tab
@@ -420,6 +437,10 @@ qresponder audit --run ./out [--zip]                       # export the evidence
 qresponder export-flagged --run ./out --out flagged.csv [--by-owner]   # send to an SME
 qresponder import-answers --csv flagged.csv --qa qa.yaml [--run ./out]  # filled CSV → library + run
 qresponder kb-check --qa qa.yaml [--merge-duplicates]   # scan the library for contradictions/dups
+qresponder ask "Do you encrypt at rest?" --workspace acme [--provider P --model M] [--json]
+qresponder stats --workspace acme                        # local completion/auto-answer analytics
+qresponder connect folder ./docs --workspace acme        # ingest a folder (explicit; never auto)
+qresponder connect website https://example.com --workspace acme --depth 1 --max-pages 20
 qresponder extract --questionnaire f.xlsx        # debug: dump extracted questions
 qresponder eval --set eval.yaml [--kb ./kb] [--qa qa.yaml] [--mode retrieval]
 qresponder approve --results out/results.json --qa qa.yaml [--by NAME] [--tags ...]

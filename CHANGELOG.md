@@ -7,6 +7,12 @@ versioning.
 ## [Unreleased]
 
 ### Added
+- **Ask mode (Phase 10 A).** `qresponder ask "<question>"` (and `POST
+  /api/workspaces/{id}/ask`) — one natural-language question through the **exact
+  same grounded path** as a questionnaire (`run_ask` reuses `orchestrate`): answer
+  + citations + explainable confidence + full audit trail; abstains when
+  unsupported. Honors the Phase-8 provider/model selection (no mock fallback);
+  key stays server-side.
 - **Provider flexibility + live model picker (Phase 8 A/B).** Keys for OpenAI /
   Gemini / DeepSeek / Anthropic (own `.env` key each) + local; OpenAI-compatible
   adapter routes the cloud ones by base URL, Anthropic native. `llm/models.py`

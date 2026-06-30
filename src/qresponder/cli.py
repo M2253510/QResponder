@@ -45,6 +45,25 @@ def _setup_logging(verbose: bool) -> None:
     )
 
 
+def _resolve_provider(cfg, provider, model):
+    """Build the chosen provider explicitly (no silent mock fallback). Returns
+    None when no --provider/--model is given (run_pipeline uses config default)."""
+    if not (provider or model):
+        return None
+    from .llm.base import ProviderError
+    from .llm.providers import canonical, is_configured, make_provider_for
+
+    p = canonical(provider or cfg.llm_provider)
+    if not is_configured(cfg, p):
+        typer.secho(f"Provider '{p}' is not configured — set its key in .env.", fg=typer.colors.RED)
+        raise typer.Exit(code=1)
+    try:
+        return make_provider_for(cfg, p, model)
+    except ProviderError as exc:
+        typer.secho(str(exc), fg=typer.colors.RED)
+        raise typer.Exit(code=1)
+
+
 @app.command()
 def doctor(
     config_path: str = typer.Option("config.yaml", "--config", help="Path to config.yaml"),
@@ -149,20 +168,7 @@ def answer(
         typer.secho(f"Unknown preset '{preset}'; using default style.", fg=typer.colors.YELLOW)
 
     # Build the selected provider explicitly — no silent mock fallback.
-    provider_obj = None
-    if provider or model:
-        from .llm.base import ProviderError
-        from .llm.providers import canonical, is_configured, make_provider_for
-
-        p = canonical(provider or cfg.llm_provider)
-        if not is_configured(cfg, p):
-            typer.secho(f"Provider '{p}' is not configured — set its key in .env.", fg=typer.colors.RED)
-            raise typer.Exit(code=1)
-        try:
-            provider_obj = make_provider_for(cfg, p, model)
-        except ProviderError as exc:
-            typer.secho(str(exc), fg=typer.colors.RED)
-            raise typer.Exit(code=1)
+    provider_obj = _resolve_provider(cfg, provider, model)
 
     result = run_pipeline(questionnaire, kb, qa, cfg, scope_tags=scope, evidence_dir=evidence,
                           preset=preset if style else None, style=style, provider=provider_obj)
@@ -198,6 +204,62 @@ def answer(
             )
 
     typer.echo("\nReview the draft (review.md) before using. Nothing was submitted.")
+
+
+@app.command()
+def ask(
+    question: str = typer.Argument(..., help="A natural-language question"),
+    workspace: str = typer.Option(None, "--workspace", help="Workspace id (uses its kb/qa/evidence)"),
+    kb: str = typer.Option(None, "--kb", help="Knowledge base directory (if no --workspace)"),
+    qa: str = typer.Option(None, "--qa", help="Answer Library YAML"),
+    evidence: str = typer.Option(None, "--evidence", help="Evidence vault dir"),
+    tags: str = typer.Option(None, "--tags", help="Tag scope"),
+    mode: str = typer.Option(None, "--mode", help="in_context | retrieval"),
+    preset: str = typer.Option(None, "--preset"),
+    provider: str = typer.Option(None, "--provider"),
+    model: str = typer.Option(None, "--model"),
+    as_json: bool = typer.Option(False, "--json", help="Emit the full AnswerResult as JSON"),
+    config_path: str = typer.Option("config.yaml", "--config"),
+    verbose: bool = typer.Option(False, "--verbose", "-v"),
+):
+    """Ask one question — the same grounded path as a questionnaire, on one item."""
+    _setup_logging(verbose)
+    from .core.pipeline import run_ask
+    from .core.presets import resolve as resolve_preset
+
+    cfg = load_config(config_path)
+    if mode:
+        cfg.kb_mode = mode
+    kb_dir, qa_path, ev_dir = kb, qa, evidence
+    if workspace:
+        from .core.workspace import WorkspaceError, WorkspaceStore
+
+        try:
+            ws = WorkspaceStore(cfg.workspaces_dir).get(workspace)
+        except WorkspaceError as exc:
+            typer.secho(str(exc), fg=typer.colors.RED)
+            raise typer.Exit(code=1)
+        kb_dir, qa_path, ev_dir = str(ws.kb_dir), str(ws.qa_path), str(ws.evidence_dir)
+
+    provider_obj = _resolve_provider(cfg, provider, model)
+    style = resolve_preset(preset)
+    r = run_ask(question, kb_dir, qa_path, cfg, scope_tags=parse_tags(tags),
+                provider=provider_obj, evidence_dir=ev_dir,
+                preset=preset if style else None, style=style)
+
+    if as_json:
+        typer.echo(r.model_dump_json(indent=2))
+        return
+    from .models import Status
+
+    if r.status == Status.ANSWERED:
+        typer.secho(f"[{r.confidence.value.upper()}] {r.answer}", fg=typer.colors.GREEN)
+        for c in r.citations:
+            snip = c.snippet if len(c.snippet) <= 160 else c.snippet[:157] + "..."
+            typer.echo(f"  cite [{c.source}]: {snip}")
+    else:
+        typer.secho(f"[NEEDS REVIEW] {r.missing_info or 'Not supported by the knowledge base.'}",
+                    fg=typer.colors.YELLOW)
 
 
 @app.command()
