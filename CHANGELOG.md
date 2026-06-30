@@ -13,6 +13,14 @@ versioning.
   + citations + explainable confidence + full audit trail; abstains when
   unsupported. Honors the Phase-8 provider/model selection (no mock fallback);
   key stays server-side.
+- **Source connectors (Phase 10 B).** A `connectors/` package (`Connector` base →
+  `SourceDoc`, ingest via the Phase-8 bulk-ingest path). **Folder** import
+  (zero-dep, path-contained) and a **website crawler** (bounded by depth/max-pages,
+  same-domain, per-request timeout, **SSRF guard** rejecting localhost/private/
+  link-local/metadata; injectable fetcher) via `qresponder connect folder|website`
+  and `POST …/connect`. Optional **Google Drive** behind a `connectors` extra.
+  Connectors run **only on explicit `connect` — never during answering**; the
+  answering path makes no fetch.
 - **Provider flexibility + live model picker (Phase 8 A/B).** Keys for OpenAI /
   Gemini / DeepSeek / Anthropic (own `.env` key each) + local; OpenAI-compatible
   adapter routes the cloud ones by base URL, Anthropic native. `llm/models.py`

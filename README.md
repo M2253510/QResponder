@@ -352,6 +352,27 @@ conflicting source named. It's conservative (no false-positive noise), never
 auto-resolves (both sides surfaced), and never flags or overrides an approved
 Tier-1 answer.
 
+## Source connectors — point it at where your docs live
+
+Instead of uploading by hand, ingest from a **folder** or **website** (Google
+Drive optional, behind the `connectors` extra) — locally, so data stays on the
+host:
+
+```
+qresponder connect folder ./policies --workspace acme --tags soc2
+qresponder connect website https://docs.example.com --workspace acme --depth 1 --max-pages 20
+```
+
+Everything goes through the same validation/sandboxing/provenance/tagging as
+manual uploads. The crawler is **bounded** (depth/max-pages, same-domain,
+per-request timeout) and **SSRF-guarded** (rejects `localhost`, private/link-local
+ranges, and cloud-metadata IPs unless you pass `--allow-private`).
+
+> **Boundary:** connectors are the **only** external-call path besides cloud
+> answering, and they run **only** when you explicitly `connect` — **never
+> automatically, never during answering.** The answering path itself makes no
+> fetch; a local model still means zero external calls.
+
 ## Ask mode
 
 Ask one question, get an instant grounded answer — it's the **exact same grounded

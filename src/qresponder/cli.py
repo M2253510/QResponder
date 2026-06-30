@@ -37,6 +37,93 @@ app = typer.Typer(
     no_args_is_help=True,
 )
 
+connect_app = typer.Typer(help="Ingest a source into a workspace (explicit; never during answering).")
+app.add_typer(connect_app, name="connect")
+
+
+def _ws_kb_dir(cfg, workspace: str):
+    from .core.workspace import WorkspaceError, WorkspaceStore
+
+    try:
+        ws = WorkspaceStore(cfg.workspaces_dir).get(workspace)
+    except WorkspaceError as exc:
+        typer.secho(str(exc), fg=typer.colors.RED)
+        raise typer.Exit(code=1)
+    return ws
+
+
+def _report_ingest(res: dict):
+    typer.secho(f"Ingested {len(res['accepted'])} file(s):", fg=typer.colors.GREEN)
+    for n in res["accepted"]:
+        typer.echo(f"  + {n}")
+    for r in res.get("rejected", []):
+        typer.secho(f"  - {r['name']}: {r['reason']}", fg=typer.colors.YELLOW)
+
+
+@connect_app.command("folder")
+def connect_folder(
+    path: str = typer.Argument(..., help="Local/mounted directory of docs"),
+    workspace: str = typer.Option(..., "--workspace", help="Workspace id"),
+    tags: str = typer.Option(None, "--tags"),
+    config_path: str = typer.Option("config.yaml", "--config"),
+):
+    """Ingest a local folder of documents into a workspace's KB."""
+    from .connectors.base import ingest_connector
+    from .connectors.folder import FolderConnector
+
+    cfg = load_config(config_path)
+    ws = _ws_kb_dir(cfg, workspace)
+    res = ingest_connector(FolderConnector(path, tags=parse_tags(tags)), ws.kb_dir, tags=parse_tags(tags))
+    _report_ingest(res)
+
+
+@connect_app.command("website")
+def connect_website(
+    url: str = typer.Argument(..., help="Start URL"),
+    workspace: str = typer.Option(..., "--workspace", help="Workspace id"),
+    depth: int = typer.Option(1, "--depth", help="Crawl depth (same-domain)"),
+    max_pages: int = typer.Option(20, "--max-pages"),
+    allow_private: bool = typer.Option(False, "--allow-private", help="Disable the SSRF guard (danger)"),
+    tags: str = typer.Option(None, "--tags"),
+    config_path: str = typer.Option("config.yaml", "--config"),
+):
+    """Crawl a website (bounded, same-domain, SSRF-guarded) into a workspace's KB."""
+    from .connectors.base import ConnectorError, ingest_connector
+    from .connectors.website import WebsiteConnector
+
+    cfg = load_config(config_path)
+    ws = _ws_kb_dir(cfg, workspace)
+    conn = WebsiteConnector(url, depth=depth, max_pages=max_pages, allow_private=allow_private,
+                            tags=parse_tags(tags))
+    try:
+        res = ingest_connector(conn, ws.kb_dir, tags=parse_tags(tags))
+    except ConnectorError as exc:
+        typer.secho(str(exc), fg=typer.colors.RED)
+        raise typer.Exit(code=1)
+    _report_ingest(res)
+
+
+@connect_app.command("gdrive")
+def connect_gdrive(
+    folder_id: str = typer.Argument(..., help="Google Drive folder id"),
+    workspace: str = typer.Option(..., "--workspace"),
+    tags: str = typer.Option(None, "--tags"),
+    config_path: str = typer.Option("config.yaml", "--config"),
+):
+    """Ingest a Google Drive folder (optional; needs the 'connectors' extra + OAuth)."""
+    from .connectors.base import ConnectorError, ingest_connector
+    from .connectors.gdrive import GoogleDriveConnector
+
+    cfg = load_config(config_path)
+    ws = _ws_kb_dir(cfg, workspace)
+    try:
+        res = ingest_connector(GoogleDriveConnector(folder_id, tags=parse_tags(tags)), ws.kb_dir,
+                               tags=parse_tags(tags))
+    except ConnectorError as exc:
+        typer.secho(str(exc), fg=typer.colors.RED)
+        raise typer.Exit(code=1)
+    _report_ingest(res)
+
 
 def _setup_logging(verbose: bool) -> None:
     logging.basicConfig(

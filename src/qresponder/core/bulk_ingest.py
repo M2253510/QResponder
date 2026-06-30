@@ -18,6 +18,11 @@ from ..kb.tags import load_tag_sidecar, normalize_tags, write_tag_sidecar
 
 PROVENANCE_SIDECAR = ".provenance.yaml"
 
+# Canonical bulk-ingest allow-lists (shared by web uploads + connectors).
+KB_INGEST_EXTS = {".txt", ".md", ".markdown", ".rst", ".csv", ".pdf", ".docx",
+                  ".xlsx", ".xlsm", ".html", ".htm"}
+EVIDENCE_INGEST_EXTS = KB_INGEST_EXTS | {".png", ".jpg", ".jpeg", ".pptx"}
+
 
 def _safe_name(name: str) -> str | None:
     base = Path(name or "").name.strip()

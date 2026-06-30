@@ -307,6 +307,37 @@ def create_app(config: Config | None = None, model_fetch=None) -> FastAPI:
     def tag_kb(wid: str, filename: str, body: dict = Body(...)):
         return {"files": _set_tags(_ws(wid).kb_dir, filename, body.get("tags"))}
 
+    @app.post("/api/workspaces/{wid}/connect")
+    def connect_source(wid: str, body: dict = Body(...)):
+        """Run a source connector (folder/website) into the workspace KB. Explicit
+        only — connectors never fetch during answering."""
+        from ..connectors.base import ConnectorError, ingest_connector
+
+        ws = _ws(wid)
+        kind = str(body.get("type", "")).lower()
+        tags = parse_tags(body.get("tags"))
+        try:
+            if kind == "folder":
+                from ..connectors.folder import FolderConnector
+
+                conn = FolderConnector(str(body.get("path", "")), tags=tags)
+            elif kind == "website":
+                from ..connectors.website import WebsiteConnector
+
+                conn = WebsiteConnector(str(body.get("url", "")), depth=int(body.get("depth", 1)),
+                                        max_pages=int(body.get("max_pages", 20)),
+                                        allow_private=bool(body.get("allow_private", False)), tags=tags)
+            elif kind == "gdrive":
+                from ..connectors.gdrive import GoogleDriveConnector
+
+                conn = GoogleDriveConnector(str(body.get("folder_id", "")), tags=tags)
+            else:
+                raise HTTPException(status_code=400, detail="type must be folder|website|gdrive")
+            res = ingest_connector(conn, ws.kb_dir, tags=tags)
+        except ConnectorError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+        return res
+
     @app.post("/api/workspaces/{wid}/evidence")
     def upload_evidence(wid: str, files: list[UploadFile], tags: str = Form(None)):
         return _bulk_upload(_ws(wid).evidence_dir, files, _EVIDENCE_INGEST_EXTS, tags=parse_tags(tags))
