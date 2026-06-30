@@ -27,6 +27,12 @@ versioning.
   tag-scoping). Effective `sources_used` / `sources_excluded` recorded in the
   audit. If excluding a source removes the grounding, the answer **abstains** —
   it never fabricates from another source.
+- **Completion / analytics (Phase 10 D).** `qresponder stats --workspace` + a web
+  Analytics panel (`GET …/stats`) — aggregates the workspace's own run
+  `results.json` files into completion rate, auto-answer rate by confidence,
+  flagged-by-reason, and a configurable, explicitly-labeled **time-saved
+  estimate** (`stats_minutes_per_question`, default 10). Local read only — no DB,
+  no telemetry, nothing sent anywhere.
 - **Provider flexibility + live model picker (Phase 8 A/B).** Keys for OpenAI /
   Gemini / DeepSeek / Anthropic (own `.env` key each) + local; OpenAI-compatible
   adapter routes the cloud ones by base URL, Anthropic native. `llm/models.py`

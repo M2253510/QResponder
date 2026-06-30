@@ -60,6 +60,9 @@ class Config(BaseModel):
 
     # --- Web UI -------------------------------------------------------------
     workspaces_dir: str = "./workspaces"  # where per-workspace asset bundles live
+    # Analytics (Phase 10 D): minutes a human would spend per question, used only
+    # for the labeled time-saved ESTIMATE. Local read; no telemetry.
+    stats_minutes_per_question: float = 10.0
 
     # --- Embeddings / reranker (Phase 1, local-first) -----------------------
     embedding_model: str = "all-MiniLM-L6-v2"

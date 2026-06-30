@@ -405,6 +405,22 @@ the full audit trail. Unsupported → it abstains (`NEEDS_REVIEW` + what's missi
 never fabricates. Web: an **Ask** box per workspace (`POST …/ask`), key stays
 server-side.
 
+## Completion / analytics
+
+See how much a workspace has answered without anyone watching it run — it reads
+only that workspace's own `runs/*/results.json`, no DB, no telemetry:
+
+```
+qresponder stats --workspace acme
+```
+
+Reports the completion rate, the auto-answer rate by confidence (high / medium /
+low), flagged counts by reason, and a **time-saved estimate** —
+`answered × minutes_per_question`, where the per-question baseline is configurable
+(`stats_minutes_per_question`, default 10) and the number is explicitly labeled an
+estimate, not a measurement. The web UI shows the same as an **Analytics** panel
+(`GET …/stats`).
+
 ## Cross-file flagged resolve
 
 When the same unresolved question appears across many files, the **Flagged** tab

@@ -50,6 +50,7 @@ def test_no_top_level_retrieval_deps():
             "qresponder.core.typeshape",
             "qresponder.core.bulk_ingest",
             "qresponder.core.qa_import",
+            "qresponder.core.stats",
             "qresponder.connectors.base",
             "qresponder.connectors.folder",
             "qresponder.connectors.website",

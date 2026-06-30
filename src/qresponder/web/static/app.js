@@ -442,6 +442,22 @@ function reviewItem(runId, item) {
 // ---- settings view ----
 async function settingsView(view, wid) {
   view.append(el("div", { class: "warn-banner" }, "This UI has no authentication and holds your full security posture. Keep it on 127.0.0.1 — don't expose it to a network without putting auth in front."));
+
+  // Completion / analytics (Phase 10 D) — local read only.
+  try {
+    const s = await api(`/api/workspaces/${wid}/stats`);
+    const stat = (label, val) => el("div", { class: "dash-stat" }, el("b", {}, String(val)), el("span", { class: "dash-label" }, label));
+    const reasons = Object.entries(s.flagged_by_reason || {}).map(([k, v]) => `${v} ${k.replace(/_/g, " ")}`).join(", ");
+    view.append(el("div", { class: "card" }, el("h2", {}, "Analytics"),
+      el("div", { class: "dash-tracker" },
+        stat("runs", s.n_runs), stat("questions", s.total_questions),
+        stat("completion", Math.round(s.completion_rate * 100) + "%"),
+        stat("auto (high+med)", Math.round(s.auto_answer_rate_high_med * 100) + "%"),
+        stat("flagged", s.flagged)),
+      reasons ? el("p", { class: "muted" }, "Flagged: " + reasons) : el("span"),
+      el("p", { class: "muted" }, `~${s.time_saved_minutes} min saved — ${s.time_saved_note}`)));
+  } catch (_) {}
+
   // Model status
   const modelCard = el("div", { class: "card" }, el("h2", {}, "Model"),
     el("div", { class: "provider" }, `${S.status.provider} · ${S.status.model}`),

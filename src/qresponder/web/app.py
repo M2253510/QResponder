@@ -440,6 +440,13 @@ def create_app(config: Config | None = None, model_fetch=None) -> FastAPI:
         write_library(ws.qa_path, lib.entries)
         return list_qa(wid)
 
+    @app.get("/api/workspaces/{wid}/stats")
+    def ws_stats(wid: str):
+        from ..core.stats import workspace_stats
+
+        ws = _ws(wid)
+        return workspace_stats(ws.runs_dir, config.stats_minutes_per_question)
+
     @app.get("/api/workspaces/{wid}/kb-check")
     def kb_check(wid: str):
         from ..core.kb_health import check_library

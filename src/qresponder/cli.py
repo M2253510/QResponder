@@ -465,6 +465,30 @@ def models(
                 typer.echo(f"  {m.id}")
 
 
+@app.command()
+def stats(
+    workspace: str = typer.Option(..., "--workspace", help="Workspace id"),
+    config_path: str = typer.Option("config.yaml", "--config"),
+):
+    """Local completion / auto-answer analytics from a workspace's run outputs."""
+    from .core.stats import workspace_stats
+
+    cfg = load_config(config_path)
+    ws = _ws_kb_dir(cfg, workspace)
+    s = workspace_stats(ws.runs_dir, cfg.stats_minutes_per_question)
+    typer.secho(f"Workspace '{workspace}' — {s['n_runs']} run(s), {s['total_questions']} question(s)",
+                fg=typer.colors.GREEN)
+    typer.echo(f"  completion rate : {s['completion_rate'] * 100:.1f}%  "
+               f"({s['answered']} answered / {s['flagged']} flagged)")
+    typer.echo(f"  auto-answer (HIGH+MED): {s['auto_answer_rate_high_med'] * 100:.1f}%  "
+               f"(high={s['auto_answer_by_confidence']['high']} med={s['auto_answer_by_confidence']['medium']})")
+    if s["flagged_by_reason"]:
+        typer.echo("  flagged by reason:")
+        for reason, c in s["flagged_by_reason"].items():
+            typer.echo(f"    - {reason}: {c}")
+    typer.echo(f"  time saved: ~{s['time_saved_minutes']} min  ({s['time_saved_note']})")
+
+
 @app.command(name="kb-check")
 def kb_check_cmd(
     qa: str = typer.Option("qa.yaml", "--qa", help="Answer Library YAML to scan"),
