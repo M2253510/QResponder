@@ -17,18 +17,23 @@ from .tags import in_scope, load_tag_sidecar, normalize_tags
 
 log = logging.getLogger("qresponder.kb")
 
-_TEXT_EXTS = {".md", ".txt", ".markdown", ".rst"}
-# KB docs may also be PDF/DOCX; their text is extracted via the ingest loaders.
-_DOC_EXTS = {".pdf", ".docx"}
+_TEXT_EXTS = {".md", ".txt", ".markdown", ".rst", ".csv"}
+# Other KB document formats; text extracted via the ingest loaders / converters.
+_DOC_EXTS = {".pdf", ".docx", ".xlsx", ".xlsm", ".html", ".htm"}
 _KB_EXTS = _TEXT_EXTS | _DOC_EXTS
 _TAGS_LINE = re.compile(r"^\s*tags?\s*:\s*(.+)$", re.IGNORECASE | re.MULTILINE)
+_TAG_STRIP = re.compile(r"<[^>]+>")
 
 
 def _read_doc_text(fp: Path) -> str:
-    """Plain text for a KB document. PDF/DOCX are extracted via the ingest
-    loaders (reusing engine code — no new parsing logic)."""
-    if fp.suffix.lower() in _TEXT_EXTS:
+    """Plain text for a KB document. Text/CSV read directly; HTML stripped of
+    tags; PDF/DOCX/XLSX extracted via the ingest loaders (reusing engine code)."""
+    ext = fp.suffix.lower()
+    if ext in _TEXT_EXTS:
         return fp.read_text(encoding="utf-8", errors="replace")
+    if ext in {".html", ".htm"}:
+        raw = fp.read_text(encoding="utf-8", errors="replace")
+        return _TAG_STRIP.sub(" ", raw)
     try:
         from ..ingest.base import load_document
 

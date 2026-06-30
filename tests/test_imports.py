@@ -48,6 +48,8 @@ def test_no_top_level_retrieval_deps():
             "qresponder.core.presets",
             "qresponder.core.kb_health",
             "qresponder.core.typeshape",
+            "qresponder.core.bulk_ingest",
+            "qresponder.core.qa_import",
             "qresponder.kb.retrieval",
             "qresponder.kb.evidence",
             "qresponder.llm.embeddings",

@@ -114,13 +114,18 @@ def test_workspaces_are_isolated_and_deletable(tmp_path):
 
 
 def test_upload_validation_rejects_bad_type(tmp_path):
+    """Phase 8 C: bulk upload rejects unsupported files PER FILE (no abort)."""
     client = _client(tmp_path)
     wid = client.post("/api/workspaces", json={"name": "W"}).json()["id"]
-    r = client.post(f"/api/workspaces/{wid}/kb",
-                    files={"files": ("evil.exe", b"MZ", "application/octet-stream")})
-    assert r.status_code == 400
-    assert "unsupported type" in r.json()["detail"].lower()
-    assert ".exe" in r.json()["detail"]
+    r = client.post(
+        f"/api/workspaces/{wid}/kb",
+        files=[("files", ("ok.md", b"policy text", "text/markdown")),
+               ("files", ("evil.exe", b"MZ", "application/octet-stream"))],
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["accepted"] == ["ok.md"]                       # good one ingested
+    assert any(".exe" in x["reason"] for x in body["rejected"])  # bad one rejected w/ reason
 
 
 def test_tags_persist_and_scope(tmp_path):
@@ -180,6 +185,20 @@ def test_workspace_batch(tmp_path):
     dl = client.get(body["download"])
     assert dl.status_code == 200
     assert dl.content[:2] == b"PK"  # zip magic
+
+
+def test_bulk_qa_import_endpoint(tmp_path):
+    client = _client(tmp_path)
+    wid = client.post("/api/workspaces", json={"name": "W"}).json()["id"]
+    csv_bytes = b"question,answer\nDo you encrypt at rest?,Yes AES-256.\n"
+    res = client.post(
+        f"/api/workspaces/{wid}/qa/import",
+        files=[("files", ("pairs.csv", csv_bytes, "text/csv")),
+               ("files", ("bad.pdf", b"%PDF", "application/pdf"))],
+    ).json()
+    assert res["imported"] == 1
+    assert any("bad.pdf" == r["name"] for r in res["rejected"])
+    assert res["total"] == 1
 
 
 def test_kb_check_endpoint(tmp_path):

@@ -42,6 +42,11 @@ _STATIC_DIR = Path(__file__).parent / "static"
 # attached to "please attach…" fields, so it allows a few more document types.
 _KB_EXTS = {".txt", ".md", ".markdown", ".rst", ".pdf", ".docx"}
 _EVIDENCE_EXTS = _KB_EXTS | {".xlsx", ".xlsm", ".csv", ".png", ".jpg", ".jpeg", ".pptx"}
+# Bulk-ingest allow-lists (Phase 8 C) — "any format" = this set (+ .zip expands).
+_KB_INGEST_EXTS = {".txt", ".md", ".markdown", ".rst", ".csv", ".pdf", ".docx",
+                   ".xlsx", ".xlsm", ".html", ".htm"}
+_EVIDENCE_INGEST_EXTS = _KB_INGEST_EXTS | {".png", ".jpg", ".jpeg", ".pptx"}
+_QA_INGEST_EXTS = {".csv", ".json", ".xlsx", ".xlsm", ".md", ".markdown", ".txt", ".docx"}
 
 
 def _safe_filename(name: str) -> str:
@@ -233,7 +238,7 @@ def create_app(config: Config | None = None, model_fetch=None) -> FastAPI:
         out = []
         if d.exists():
             for fp in sorted(d.iterdir()):
-                if fp.is_file() and fp.name != ".tags.yaml":
+                if fp.is_file() and not fp.name.startswith("."):  # skip sidecars
                     out.append({"name": fp.name, "tags": sidecar.get(fp.name, [])})
         return out
 
@@ -267,24 +272,17 @@ def create_app(config: Config | None = None, model_fetch=None) -> FastAPI:
         store.delete(wid)
         return {"deleted": wid}
 
-    # ---- KB / evidence assets ---------------------------------------------
-    def _upload(dest_dir: Path, files: list[UploadFile], allowed: set[str]) -> list[dict]:
-        dest_dir.mkdir(parents=True, exist_ok=True)
-        for f in files:
-            name = _safe_filename(f.filename or "")
-            ext = Path(name).suffix.lower()
-            if ext not in allowed:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"'{name}': unsupported type '{ext or '(none)'}'. "
-                           f"Allowed: {', '.join(sorted(allowed))}.",
-                )
-            (dest_dir / name).write_bytes(f.file.read())
-        return _list_dir(dest_dir)
+    # ---- KB / evidence assets (Phase 8 C: bulk, per-file feedback, zip) -----
+    def _bulk_upload(dest_dir: Path, files: list[UploadFile], allowed: set[str], tags=None) -> dict:
+        from ..core.bulk_ingest import ingest_files
+
+        items = [(f.filename or "", f.file.read()) for f in files]
+        return ingest_files(items, dest_dir, allowed, tags=tags)
 
     @app.post("/api/workspaces/{wid}/kb")
-    def upload_kb(wid: str, files: list[UploadFile]):
-        return {"files": _upload(_ws(wid).kb_dir, files, _KB_EXTS)}
+    def upload_kb(wid: str, files: list[UploadFile], tags: str = Form(None)):
+        res = _bulk_upload(_ws(wid).kb_dir, files, _KB_INGEST_EXTS, tags=parse_tags(tags))
+        return res  # {accepted, rejected, files}
 
     @app.get("/api/workspaces/{wid}/kb")
     def list_kb(wid: str):
@@ -299,8 +297,8 @@ def create_app(config: Config | None = None, model_fetch=None) -> FastAPI:
         return {"files": _set_tags(_ws(wid).kb_dir, filename, body.get("tags"))}
 
     @app.post("/api/workspaces/{wid}/evidence")
-    def upload_evidence(wid: str, files: list[UploadFile]):
-        return {"files": _upload(_ws(wid).evidence_dir, files, _EVIDENCE_EXTS)}
+    def upload_evidence(wid: str, files: list[UploadFile], tags: str = Form(None)):
+        return _bulk_upload(_ws(wid).evidence_dir, files, _EVIDENCE_INGEST_EXTS, tags=parse_tags(tags))
 
     @app.get("/api/workspaces/{wid}/evidence")
     def list_evidence(wid: str):
@@ -354,6 +352,24 @@ def create_app(config: Config | None = None, model_fetch=None) -> FastAPI:
         approve_one(q, a, ws.qa_path, approved_by=body.get("approved_by") or "web",
                     tags=body.get("tags"))
         return list_qa(wid)
+
+    @app.post("/api/workspaces/{wid}/qa/import")
+    def import_qa_files(wid: str, files: list[UploadFile], tags: str = Form(None)):
+        """Bulk-import approved answers from CSV/JSON/XLSX/MD/DOCX → approve_one."""
+        from ..core.qa_import import import_qa
+
+        ws = _ws(wid)
+        accepted, rejected = [], []
+        for f in files:
+            ext = Path(f.filename or "").suffix.lower()
+            if ext not in _QA_INGEST_EXTS:
+                rejected.append({"name": f.filename, "reason": f"unsupported Q&A format '{ext}'"})
+            else:
+                accepted.append((f.filename or "", f.file.read()))
+        res = import_qa(accepted, ws.qa_path, approved_by="import", tags=parse_tags(tags))
+        res["rejected"] = rejected
+        res["total"] = len(AnswerLibrary.load(ws.qa_path).entries)
+        return res
 
     @app.put("/api/workspaces/{wid}/qa/{index}")
     def edit_qa(wid: str, index: int, body: dict = Body(...)):

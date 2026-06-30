@@ -16,6 +16,13 @@ versioning.
   `qresponder models`, `--provider/--model` on `answer`; per-run + workspace-default
   model selection. **No silent mock fallback** — an unreachable/unconfigured
   provider blocks the run with a clear error; the mock is test-only.
+- **Bulk any-format ingestion (Phase 8 C).** Many files in one upload for KB and
+  evidence (`core/bulk_ingest.py`) — PDF/DOCX/XLSX/CSV/TXT/MD/HTML **plus
+  ZIP-of-those** (expanded + ingested); each file validated, filename-sanitized
+  (no traversal), tagged, and given provenance; unsupported types rejected
+  **per file with a reason** (no abort). Approved answers from CSV/JSON/XLSX/MD/
+  two-column DOCX (`core/qa_import.py`) routed through `approve_one` (dedup/
+  version). KB loader extended to read HTML/XLSX/CSV.
 - **Competitor-parity phase (Phase 7).**
   - **Answer-style presets** — built-in `concise`/`detailed`/`formal` + custom
     per-workspace presets; `--preset` / run form / workspace default. Style-only:
