@@ -1,0 +1,71 @@
+/* QRESPONDER design tokens — the single source of truth. No component may use a
+   raw hex/size; everything derives from here. "Ink & Evidence": cool ink neutrals
+   with real elevation, a disciplined violet→blue accent ramp, calibrated semantics.
+   All greys are checked for WCAG AA on their intended surface. System fonts only. */
+:root {
+  /* -- neutral ink ramp (surfaces lighten as they rise) -- */
+  --bg:         #0c0f14;   /* app background — deepest ink */
+  --surface-1:  #12171f;   /* base cards */
+  --surface-2:  #1a212b;   /* elevated: modals, tiles, active rows */
+  --surface-3:  #232c39;   /* highest: hovers, inset wells */
+  --border:     #2a3340;   /* hairline on surface-1 */
+  --border-2:   #384454;   /* stronger: inputs, dividers under attention */
+
+  /* -- text ramp (AA-checked on --surface-1 and darker) -- */
+  --text-1:     #f3f6fa;   /* headings / primary — ~15:1 */
+  --text-2:     #c3cdda;   /* body — ~9:1 */
+  --text-3:     #93a1b2;   /* captions / labels — ~5.2:1 (AA normal) */
+  --text-on-accent: #ffffff;
+
+  /* -- accent: violet→blue as a controlled ramp, not a loud fill -- */
+  --accent:        #8a8cf8;  /* links / active text — AA on ink */
+  --accent-strong: #6f72f0;  /* solid interactive */
+  --accent-hover:  #9a9cff;
+  --accent-press:  #5f62e0;
+  --accent-fill:   rgba(124,108,255,.16);  /* subtle selection/tint */
+  --accent-line:   rgba(124,108,255,.42);  /* subtle border */
+  --grad:          linear-gradient(135deg, #7c5cff 0%, #4f8ef7 100%);
+  --grad-press:    linear-gradient(135deg, #6f4ff0 0%, #3f7fe8 100%);
+
+  /* -- semantics (each: text on ink, solid, subtle fill, line) -- */
+  --ok:        #4ecb7b;  --ok-solid:   #2ea85c;  --ok-fill:   rgba(46,204,113,.14);  --ok-line:   rgba(46,204,113,.42);
+  --warn:      #edb54a;  --warn-solid: #d29a2a;  --warn-fill: rgba(224,169,46,.14);  --warn-line: rgba(224,169,46,.42);
+  --danger:    #ff6b81;  --danger-solid:#e8455f; --danger-fill:rgba(240,87,110,.14); --danger-line:rgba(240,87,110,.42);
+  --info:      #5eb0ff;  --info-solid: #3f8ee8;  --info-fill: rgba(76,139,245,.14);  --info-line: rgba(76,139,245,.40);
+
+  /* confidence = calibrated semantic signal */
+  --conf-high: var(--ok); --conf-high-fill: var(--ok-fill); --conf-high-line: var(--ok-line);
+  --conf-med:  var(--warn); --conf-med-fill: var(--warn-fill); --conf-med-line: var(--warn-line);
+  --conf-low:  var(--danger); --conf-low-fill: var(--danger-fill); --conf-low-line: var(--danger-line);
+
+  /* -- type -- */
+  --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --mono: ui-monospace, SFMono-Regular, "Cascadia Code", "Cascadia Mono", Consolas, monospace;
+  --fs-caption: 12px; --fs-sm: 13px; --fs-body: 14px; --fs-lg: 16px;
+  --fs-h3: 20px; --fs-h2: 28px; --fs-h1: 40px;
+  --fw-normal: 400; --fw-medium: 500; --fw-semibold: 600; --fw-bold: 700;
+  --lh-tight: 1.2; --lh-snug: 1.4; --lh-body: 1.6;
+  --tracking-caps: .06em;   /* eyebrows / labels */
+
+  /* -- spacing scale -- */
+  --sp-1: 4px; --sp-2: 8px; --sp-3: 12px; --sp-4: 16px; --sp-5: 24px; --sp-6: 32px; --sp-7: 48px; --sp-8: 64px;
+
+  /* -- radius -- */
+  --r-sm: 8px; --r-md: 12px; --r-lg: 16px; --r-full: 999px;
+
+  /* -- elevation (shadow paired with surface-lightening, never a harsh drop) -- */
+  --e-1: 0 1px 2px rgba(0,0,0,.30);
+  --e-2: 0 6px 20px -6px rgba(0,0,0,.45);
+  --e-3: 0 18px 48px -12px rgba(0,0,0,.60);
+  --ring: 0 0 0 3px var(--accent-fill), 0 0 0 1px var(--accent-strong);
+
+  /* -- motion -- */
+  --dur-fast: 140ms; --dur: 200ms; --dur-slow: 280ms;
+  --ease: cubic-bezier(.2, .7, .2, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root { --dur-fast: 0ms; --dur: 0ms; --dur-slow: 0ms; }
+  * { animation-duration: .001ms !important; animation-iteration-count: 1 !important;
+      transition-duration: .001ms !important; scroll-behavior: auto !important; }
+}

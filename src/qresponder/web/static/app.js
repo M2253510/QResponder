@@ -28,9 +28,50 @@ const jpatch = (p, body) => api(p, { method: "PATCH", headers: { "Content-Type":
 const jput = (p, body) => api(p, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
 const csv = (s) => (s || "").split(",").map((x) => x.trim()).filter(Boolean);
 function toast(msg, kind = "") {
-  const t = el("div", { class: "toast " + kind }, msg);
+  const t = el("div", { class: "toast " + kind, role: "status", "aria-live": "polite" }, msg);
   document.body.append(t);
   setTimeout(() => t.remove(), 4200);
+}
+
+// --- inline icon set (local SVG, no external assets) ---
+const ICONS = {
+  upload: '<path d="M12 16V4M6 10l6-6 6 6M4 20h16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>',
+  book: '<path d="M4 5a2 2 0 012-2h13v16H6a2 2 0 00-2 2V5z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M9 3v14" fill="none" stroke="currentColor" stroke-width="2"/>',
+  flag: '<path d="M5 21V4m0 0h11l-2 4 2 4H5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>',
+  copy: '<path d="M8 8h11v11H8zM5 16V5h11" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>',
+  check: '<path d="M4 12l5 5L20 6" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>',
+  plug: '<path d="M9 3v5M15 3v5M6 8h12v3a6 6 0 01-12 0V8zM12 17v4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>',
+};
+function icon(name) {
+  const wrap = document.createElement("span");
+  wrap.innerHTML = `<svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true">${ICONS[name] || ""}</svg>`;
+  return wrap.firstChild;
+}
+function emptyState(glyph, title, text, action) {
+  return el("div", { class: "empty" }, el("div", { class: "glyph" }, icon(glyph)),
+    el("h3", {}, title), el("p", {}, text), action || null);
+}
+function skeleton(kind, n = 3) {
+  const wrap = el("div", {});
+  for (let i = 0; i < n; i++) wrap.append(el("div", { class: "skeleton " + (kind || "sk-row"), "aria-hidden": "true" }));
+  return wrap;
+}
+// Accessible modal shell: backdrop-click + Escape close, initial focus.
+function openModal(titleText, bodyNodes, footNodes) {
+  const bg = el("div", { class: "modal-bg", role: "dialog", "aria-modal": "true", "aria-label": titleText });
+  const close = () => { bg.remove(); document.removeEventListener("keydown", onKey); };
+  const onKey = (e) => { if (e.key === "Escape") close(); };
+  document.addEventListener("keydown", onKey);
+  bg.addEventListener("click", (e) => { if (e.target === bg) close(); });
+  const xBtn = el("button", { class: "x", "aria-label": "Close dialog", onclick: close }, "×");
+  bg.append(el("div", { class: "modal" },
+    el("div", { class: "modal-head" }, el("h2", {}, titleText), xBtn),
+    el("div", { class: "modal-body" }, ...(bodyNodes || [])),
+    footNodes ? el("div", { class: "modal-foot" }, ...footNodes) : null));
+  document.body.append(bg);
+  const focusable = bg.querySelector("input, textarea, select, button.primary");
+  if (focusable) setTimeout(() => focusable.focus(), 30);
+  return { bg, close };
 }
 
 const S = { workspaces: [], current: null, status: {}, doctor: null, page: "upload", recent: {} };
@@ -118,10 +159,12 @@ function uploadPage(view, wid) {
 
   // --- dropzone + file list ---
   const picked = [];
-  const dz = el("div", { class: "dropzone" },
+  const dz = el("div", { class: "dropzone", role: "button", tabindex: "0", "aria-label": "Add questionnaire files" },
+    el("div", { class: "dz-glyph" }, icon("upload")),
     el("div", {}, el("strong", {}, "Drop your questionnaire files here"), " or click to choose"),
     el("div", { class: "dz-hint" }, "supports .docx, .pdf, .xlsx, .csv — up to 50 per batch"));
   const fileInput = el("input", { type: "file", multiple: "multiple", class: "hidden", accept: UPLOAD_EXTS.join(",") });
+  dz.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); fileInput.click(); } });
   const list = el("ul", { class: "filelist" });
   const err = el("div", {});
   const runHost = el("div", {});
@@ -363,7 +406,10 @@ function groundedResult(r) {
     card.append(el("div", { class: "panel warn" }, el("h4", {}, "No grounded answer found — flagged for review"),
       el("div", {}, r.missing_info || "The knowledge base doesn't support an answer to this question. Add a supporting document or an approved answer, then ask again.")));
   } else {
-    card.append(el("div", { class: "answer-box" }, el("div", { class: "panel" }, r.answer || "(no answer)")));
+    // Signature: the answer sits on the provenance rail, tagged with its top source.
+    const topSrc = (r.citations && r.citations[0] && r.citations[0].source) || "grounded context";
+    card.append(el("div", { class: "answer-box" }, el("div", { class: "rail" },
+      el("span", { class: "rail-src" }, "grounded in · " + topSrc), el("div", {}, r.answer || "(no answer)"))));
     if (flagged && r.missing_info) card.append(el("div", { class: "panel warn" }, el("h4", {}, "Why flagged"), r.missing_info));
   }
 
@@ -423,8 +469,11 @@ function kbPage(view, wid) {
 
 // --- Tab 1: Entries ---
 async function entriesTab(host, wid) {
+  host.append(el("div", { class: "statgrid" }, skeleton("sk-tile", 1).firstChild, skeleton("sk-tile", 1).firstChild),
+    el("div", { class: "card" }, skeleton("sk-row", 5)));
   let entries = [];
-  try { entries = (await api(`/api/workspaces/${wid}/qa`)).entries; } catch (e) { host.append(el("div", { class: "error" }, e.message)); return; }
+  try { entries = (await api(`/api/workspaces/${wid}/qa`)).entries; } catch (e) { host.replaceChildren(el("div", { class: "error" }, e.message)); return; }
+  host.replaceChildren();
   const cats = [...new Set(entries.map((e) => (e.tags && e.tags[0]) || "uncategorized"))].sort();
 
   const stats = el("div", { class: "statgrid" },
@@ -449,7 +498,16 @@ async function entriesTab(host, wid) {
       if (q && !(e.question.toLowerCase().includes(q) || (e.answer || "").toLowerCase().includes(q))) return false;
       return true;
     });
-    if (!rows.length) { tblHost.replaceChildren(el("div", { class: "empty-teach" }, el("strong", {}, "No matching entries"), entries.length ? " — adjust the search or filter." : " — add your first approved answer.")); return; }
+    if (!rows.length) {
+      tblHost.replaceChildren(entries.length
+        ? el("div", { class: "empty-teach" }, el("strong", {}, "No matching entries"), " — adjust the search or filter.")
+        : emptyState("book", "No approved answers yet",
+            "Add a Q&A pair or import a CSV/XLSX. Answers here are used first, verbatim — and the flywheel grows this as you review.",
+            el("div", { class: "btn-row", style: "justify-content:center" },
+              el("button", { class: "btn primary", onclick: () => openQaModal(wid, null, () => entriesTab(host.replaceChildren() || host, wid)) }, "Add your first Q&A"),
+              el("button", { class: "btn ghost", onclick: () => openImportModal(wid, () => entriesTab(host.replaceChildren() || host, wid)) }, "Import a file"))));
+      return;
+    }
     const table = el("table", { class: "tbl" }, el("thead", {}, el("tr", {},
       el("th", {}, "Category"), el("th", {}, "Question"), el("th", {}, "Answer"), el("th", { class: "acts" }, "Actions"))));
     const tb = el("tbody", {});
@@ -481,67 +539,58 @@ function openQaModal(wid, entry, onSaved) {
   const q = el("textarea", { placeholder: "The question as it appears in questionnaires" }, entry ? entry.question : "");
   const a = el("textarea", { placeholder: "Your approved answer (used first, verbatim)" }, entry ? entry.answer : "");
   const err = el("div", {});
-  const bg = el("div", { class: "modal-bg" });
-  const close = () => bg.remove();
-  bg.addEventListener("click", (e) => { if (e.target === bg) close(); });
-  const save = el("button", { class: "btn primary", onclick: async () => {
-    if (!q.value.trim() || !a.value.trim()) { err.replaceChildren(el("div", { class: "error" }, "Question and answer are required.")); return; }
+  const cancel = el("button", { class: "btn ghost" }, "Cancel");
+  const save = el("button", { class: "btn primary" }, "Save changes");
+  const m = openModal(isEdit ? "Edit Q&A" : "Add Q&A", [
+    el("label", { class: "field" }, "Category", catInput),
+    el("label", { class: "field" }, "Question", q),
+    el("label", { class: "field" }, "Answer", a), err,
+  ], [cancel, save]);
+  cancel.addEventListener("click", m.close);
+  save.addEventListener("click", async () => {
+    if (!q.value.trim() || !a.value.trim()) { err.replaceChildren(el("div", { class: "error" }, "Add both a question and an answer to save.")); return; }
     const tags = catInput.value.trim() ? [catInput.value.trim()] : [];
     try {
       if (isEdit) await jput(`/api/workspaces/${wid}/qa/${entry.index}`, { question: q.value, answer: a.value, tags });
       else await jpost(`/api/workspaces/${wid}/qa`, { question: q.value, answer: a.value, tags });
-      close(); toast(isEdit ? "Entry updated." : "Entry added.", "good"); onSaved && onSaved();
+      m.close(); toast(isEdit ? "Entry updated." : "Entry added.", "good"); onSaved && onSaved();
     } catch (e) { err.replaceChildren(el("div", { class: "error" }, e.message)); }
-  } }, "Save changes");
-  bg.append(el("div", { class: "modal" },
-    el("div", { class: "modal-head" }, el("h2", {}, isEdit ? "Edit Q&A" : "Add Q&A"), el("span", { class: "x", onclick: close }, "×")),
-    el("div", { class: "modal-body" },
-      el("label", { class: "field" }, "Category", catInput),
-      el("label", { class: "field" }, "Question", q),
-      el("label", { class: "field" }, "Answer", a), err),
-    el("div", { class: "modal-foot" }, el("button", { class: "btn ghost", onclick: close }, "Cancel"), save)));
-  document.body.append(bg);
+  });
 }
 
 function openImportModal(wid, onDone) {
   const fileInput = el("input", { type: "file", multiple: "multiple", accept: ".csv,.json,.xlsx,.xlsm,.md,.markdown,.txt,.docx" });
   const res = el("div", {});
-  const bg = el("div", { class: "modal-bg" });
-  const close = () => bg.remove();
-  bg.addEventListener("click", (e) => { if (e.target === bg) close(); });
-  const imp = el("button", { class: "btn primary", onclick: async () => {
-    if (!fileInput.files.length) return;
+  const closeBtn = el("button", { class: "btn ghost" }, "Close");
+  const imp = el("button", { class: "btn primary" }, "Import");
+  const m = openModal("Import Q&A", [
+    el("p", { class: "muted" }, "CSV / JSON / XLSX / Markdown / DOCX. Each pair routes through the library (dedup + version)."),
+    fileInput, res,
+  ], [closeBtn, imp]);
+  closeBtn.addEventListener("click", m.close);
+  imp.addEventListener("click", async () => {
+    if (!fileInput.files.length) { res.replaceChildren(el("div", { class: "error" }, "Choose at least one file to import.")); return; }
     const fd = new FormData();
     for (const f of fileInput.files) fd.append("files", f);
-    res.replaceChildren(el("span", { class: "muted" }, "Importing…"));
+    res.replaceChildren(el("span", { class: "muted" }, el("span", { class: "spinner" }), " Importing…"));
     try {
       const r = await api(`/api/workspaces/${wid}/qa/import`, { method: "POST", body: fd });
       const added = r.added ?? r.imported ?? 0, updated = r.updated ?? 0, skipped = (r.skipped ?? 0) + ((r.rejected || []).length);
-      res.replaceChildren(el("div", { class: "ok-msg" }, `✓ ${added} added, ${updated} updated, ${skipped} skipped. Library now ${r.total ?? "?"} entries.`));
+      res.replaceChildren(el("div", { class: "ok-msg" }, `Imported ${added} · updated ${updated} · skipped ${skipped}. Library now holds ${r.total ?? "?"} entries.`));
       (r.rejected || []).forEach((x) => res.append(el("div", { class: "faint" }, `skipped ${x.name}: ${x.reason}`)));
       onDone && onDone();
     } catch (e) { res.replaceChildren(el("div", { class: "error" }, e.message)); }
-  } }, "Import");
-  bg.append(el("div", { class: "modal" },
-    el("div", { class: "modal-head" }, el("h2", {}, "Import Q&A"), el("span", { class: "x", onclick: close }, "×")),
-    el("div", { class: "modal-body" },
-      el("p", { class: "muted" }, "CSV / JSON / XLSX / Markdown / DOCX. Each pair routes through the library (dedup + version)."),
-      fileInput, res),
-    el("div", { class: "modal-foot" }, el("button", { class: "btn ghost", onclick: close }, "Close"), imp)));
-  document.body.append(bg);
+  });
 }
 
 function exportMenu(wid) {
-  const bg = el("div", { class: "modal-bg" });
-  const close = () => bg.remove();
-  bg.addEventListener("click", (e) => { if (e.target === bg) close(); });
-  bg.append(el("div", { class: "modal" },
-    el("div", { class: "modal-head" }, el("h2", {}, "Export library"), el("span", { class: "x", onclick: close }, "×")),
-    el("div", { class: "modal-body" }, el("p", { class: "muted" }, "Download the full answer library."),
-      el("div", { class: "btn-row" },
-        el("a", { class: "btn primary", href: `/api/workspaces/${wid}/qa/export?fmt=csv`, download: "qa_library.csv", onclick: close }, "Export CSV"),
-        el("a", { class: "btn ghost", href: `/api/workspaces/${wid}/qa/export?fmt=json`, download: "qa_library.json", onclick: close }, "Export JSON")))));
-  document.body.append(bg);
+  const m = openModal("Export library", [
+    el("p", { class: "muted" }, "Download the full answer library."),
+    el("div", { class: "btn-row" },
+      el("a", { class: "btn primary", href: `/api/workspaces/${wid}/qa/export?fmt=csv`, download: "qa_library.csv" }, "Export CSV"),
+      el("a", { class: "btn ghost", href: `/api/workspaces/${wid}/qa/export?fmt=json`, download: "qa_library.json" }, "Export JSON")),
+  ]);
+  for (const a of m.bg.querySelectorAll("a")) a.addEventListener("click", m.close);
 }
 
 // --- Tab 2: Flagged (cross-file resolve) ---
@@ -571,7 +620,9 @@ async function flaggedTab(host, wid) {
 
   const cards = el("div", {});
   if (!groups.length) {
-    cards.append(el("div", { class: "empty-teach" }, el("strong", {}, "Nothing flagged"), " — process some questionnaires; unresolved questions group here across files."));
+    cards.append(emptyState("flag", "Nothing flagged",
+      "When a batch produces questions your KB can't answer, they group here across every file — answer once, resolve everywhere.",
+      el("button", { class: "btn primary", onclick: () => go("upload") }, "Process a questionnaire")));
   } else {
     for (const g of groups) cards.append(flaggedCard(wid, g, selected, () => flaggedTab(host.replaceChildren() || host, wid)));
   }
