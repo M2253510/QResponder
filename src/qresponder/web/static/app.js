@@ -760,6 +760,7 @@ async function settingsPage(view, wid) {
   // KB docs + evidence
   view.append(el("div", { class: "card" }, el("h2", {}, "Knowledge base documents"),
     el("p", { class: "muted" }, "Cited when answering. Tag docs to scope which answer which questionnaire."), assetManager(wid, "kb")));
+  view.append(connectPanel(wid));
   view.append(el("div", { class: "card" }, el("h2", {}, "Evidence vault"),
     el("p", { class: "muted" }, "Attached to “please attach…” questions; not used as answer text."), assetManager(wid, "evidence")));
 
@@ -789,6 +790,58 @@ async function settingsPage(view, wid) {
       await api(`/api/workspaces/${wid}`, { method: "DELETE" }); S.current = null; await loadWorkspaces();
       if (S.workspaces.length) { S.current = S.workspaces[0].id; renderSwitcher(); go("upload"); } else { hideChrome(); showWizard(); }
     } }, "Delete this workspace"))));
+}
+
+// ---- Connect a source (folder/website/SaaS connectors) ----
+function connectPanel(wid) {
+  const card = el("div", { class: "card" }, el("div", { style: "display:flex;gap:10px;align-items:center;margin-bottom:6px" },
+    el("span", { style: "color:var(--accent)" }, icon("plug")), el("h2", { style: "margin:0" }, "Connect a source")),
+    el("p", { class: "muted" }, "Pull documents from where they live into this workspace's KB. Credentials stay server-side in .env; connectors run only when you click Connect — never during answering."));
+  const sel = el("select", { "aria-label": "Connector type" });
+  const fieldsHost = el("div", {});
+  const tags = el("input", { class: "tagedit", placeholder: "tags (optional)" });
+  const status = el("div", {});
+  const connectBtn = el("button", { class: "btn primary" }, "Connect");
+  let conns = [];
+  const spec = () => conns.find((c) => c.type === sel.value);
+
+  function renderFields() {
+    const c = spec(); if (!c) return;
+    const inputs = {};
+    fieldsHost.replaceChildren(...c.fields.map((f) => {
+      const inp = el("input", { type: f.type === "number" ? "number" : "text", placeholder: f.label,
+        value: f.name === "depth" ? "1" : f.name === "max_pages" ? "20" : "" });
+      inputs[f.name] = inp;
+      return el("label", { class: "field" }, f.label, inp);
+    }));
+    fieldsHost._inputs = inputs;
+    if (c.needs_cred && !c.configured)
+      status.replaceChildren(el("div", { class: "warn-banner" }, `Credential not set — add ${c.cred_hint || "the token"} on the server, then Connect.`));
+    else status.replaceChildren();
+  }
+  connectBtn.addEventListener("click", async () => {
+    const c = spec(); if (!c) return;
+    const body = { type: c.type, tags: csv(tags.value) };
+    for (const [k, inp] of Object.entries(fieldsHost._inputs || {})) if (inp.value.trim()) body[k] = inp.value.trim();
+    connectBtn.disabled = true; status.replaceChildren(el("span", { class: "muted" }, el("span", { class: "spinner" }), " Connecting…"));
+    try {
+      const r = await jpost(`/api/workspaces/${wid}/connect`, body);
+      const n = (r.accepted || []).length;
+      status.replaceChildren(el("div", { class: "ok-msg" }, `Ingested ${n} document(s) into the KB.`));
+      (r.rejected || []).forEach((x) => status.append(el("div", { class: "faint" }, `skipped ${x.name}: ${x.reason}`)));
+    } catch (e) { status.replaceChildren(el("div", { class: "error" }, e.message)); }
+    finally { connectBtn.disabled = false; }
+  });
+  sel.addEventListener("change", renderFields);
+  api("/api/connectors").then((list) => {
+    conns = list;
+    sel.replaceChildren(...list.map((c) => el("option", { value: c.type },
+      c.label + (c.needs_cred ? (c.configured ? " ✓" : " (set token)") : ""))));
+    renderFields();
+  }).catch(() => card.append(el("div", { class: "muted" }, "Connectors unavailable.")));
+  card.append(el("div", { class: "row" }, el("label", { class: "field" }, "Source", sel), el("label", { class: "field" }, "Tags", tags)),
+    fieldsHost, el("div", { class: "btn-row" }, connectBtn), status);
+  return card;
 }
 
 // ---- asset manager (KB / evidence) with drag-drop + tag editor ----

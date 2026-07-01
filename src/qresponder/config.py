@@ -49,6 +49,14 @@ class Config(BaseModel):
     gemini_api_key: str = ""
     deepseek_api_key: str = ""
 
+    # Source-connector credentials (Phase 12) — server-side only, never in the browser.
+    # Used ONLY by an explicit `connect`; never touched during answering.
+    confluence_token: str = ""
+    confluence_base_url: str = ""
+    confluence_email: str = ""
+    notion_token: str = ""
+    microsoft_token: str = ""  # MS Graph token for SharePoint + OneDrive
+
     # Local / generic OpenAI-compatible path (Ollama / vLLM / LM Studio / OpenRouter)
     llm_base_url: str = "http://localhost:11434/v1"
     llm_api_key: str = "ollama"
@@ -143,6 +151,11 @@ _ENV_MAP = {
     "OPENAI_API_KEY": "openai_api_key",
     "GEMINI_API_KEY": "gemini_api_key",
     "DEEPSEEK_API_KEY": "deepseek_api_key",
+    "CONFLUENCE_TOKEN": "confluence_token",
+    "CONFLUENCE_BASE_URL": "confluence_base_url",
+    "CONFLUENCE_EMAIL": "confluence_email",
+    "NOTION_TOKEN": "notion_token",
+    "MICROSOFT_TOKEN": "microsoft_token",
     "LLM_BASE_URL": "llm_base_url",
     "LLM_API_KEY": "llm_api_key",
     "LLM_MODEL": "llm_model",

@@ -310,6 +310,30 @@ def create_app(config: Config | None = None, model_fetch=None) -> FastAPI:
     def tag_kb(wid: str, filename: str, body: dict = Body(...)):
         return {"files": _set_tags(_ws(wid).kb_dir, filename, body.get("tags"))}
 
+    @app.get("/api/connectors")
+    def list_connectors():
+        """Available source connectors + the fields each needs. Reports whether the
+        server-side credential is set — but NEVER returns the credential itself."""
+        return [
+            {"type": "folder", "label": "Folder", "fields": [{"name": "path", "label": "Folder path"}],
+             "configured": True, "needs_cred": False},
+            {"type": "website", "label": "Website", "configured": True, "needs_cred": False,
+             "fields": [{"name": "url", "label": "Start URL"}, {"name": "depth", "label": "Depth", "type": "number"},
+                        {"name": "max_pages", "label": "Max pages", "type": "number"}]},
+            {"type": "confluence", "label": "Confluence", "needs_cred": True,
+             "configured": bool(config.confluence_token and config.confluence_base_url),
+             "fields": [{"name": "space", "label": "Space key"}],
+             "cred_hint": "confluence_token + confluence_base_url in .env"},
+            {"type": "notion", "label": "Notion", "needs_cred": True, "configured": bool(config.notion_token),
+             "fields": [{"name": "database", "label": "Database id"}], "cred_hint": "notion_token in .env"},
+            {"type": "sharepoint", "label": "SharePoint", "needs_cred": True, "configured": bool(config.microsoft_token),
+             "fields": [{"name": "site", "label": "Site id"}], "cred_hint": "microsoft_token in .env"},
+            {"type": "onedrive", "label": "OneDrive", "needs_cred": True, "configured": bool(config.microsoft_token),
+             "fields": [{"name": "folder", "label": "Folder path (blank = root)"}], "cred_hint": "microsoft_token in .env"},
+            {"type": "gdrive", "label": "Google Drive", "needs_cred": True, "configured": False,
+             "fields": [{"name": "folder_id", "label": "Folder id"}], "cred_hint": "OAuth via the connectors extra"},
+        ]
+
     @app.post("/api/workspaces/{wid}/connect")
     def connect_source(wid: str, body: dict = Body(...)):
         """Run a source connector (folder/website) into the workspace KB. Explicit
@@ -334,8 +358,26 @@ def create_app(config: Config | None = None, model_fetch=None) -> FastAPI:
                 from ..connectors.gdrive import GoogleDriveConnector
 
                 conn = GoogleDriveConnector(str(body.get("folder_id", "")), tags=tags)
+            elif kind == "confluence":
+                from ..connectors.confluence import ConfluenceConnector
+
+                conn = ConfluenceConnector(str(body.get("space", "")), token=config.confluence_token,
+                                           base_url=config.confluence_base_url, email=config.confluence_email, tags=tags)
+            elif kind == "notion":
+                from ..connectors.notion import NotionConnector
+
+                conn = NotionConnector(str(body.get("database", "")), token=config.notion_token, tags=tags)
+            elif kind == "sharepoint":
+                from ..connectors.sharepoint import SharePointConnector
+
+                conn = SharePointConnector(str(body.get("site", "")), token=config.microsoft_token, tags=tags)
+            elif kind == "onedrive":
+                from ..connectors.onedrive import OneDriveConnector
+
+                conn = OneDriveConnector(str(body.get("folder", "")), token=config.microsoft_token, tags=tags)
             else:
-                raise HTTPException(status_code=400, detail="type must be folder|website|gdrive")
+                raise HTTPException(status_code=400,
+                                    detail="type must be folder|website|gdrive|confluence|notion|sharepoint|onedrive")
             res = ingest_connector(conn, ws.kb_dir, tags=tags)
         except ConnectorError as exc:
             raise HTTPException(status_code=400, detail=str(exc))

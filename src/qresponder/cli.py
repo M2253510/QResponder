@@ -125,6 +125,77 @@ def connect_gdrive(
     _report_ingest(res)
 
 
+def _connect_saas(cfg, workspace: str, conn, tags: str):
+    """Shared run+report for the credentialed SaaS connectors (Phase 12)."""
+    from .connectors.base import ConnectorError, ingest_connector
+
+    ws = _ws_kb_dir(cfg, workspace)
+    try:
+        res = ingest_connector(conn, ws.kb_dir, tags=parse_tags(tags))
+    except ConnectorError as exc:
+        typer.secho(str(exc), fg=typer.colors.RED)
+        raise typer.Exit(code=1)
+    _report_ingest(res)
+
+
+@connect_app.command("confluence")
+def connect_confluence(
+    space: str = typer.Argument(..., help="Confluence space key"),
+    workspace: str = typer.Option(..., "--workspace"),
+    tags: str = typer.Option(None, "--tags"),
+    config_path: str = typer.Option("config.yaml", "--config"),
+):
+    """Ingest a Confluence space (token/base_url from server config; explicit only)."""
+    from .connectors.confluence import ConfluenceConnector
+
+    cfg = load_config(config_path)
+    _connect_saas(cfg, workspace, ConfluenceConnector(
+        space, token=cfg.confluence_token, base_url=cfg.confluence_base_url,
+        email=cfg.confluence_email, tags=parse_tags(tags)), tags)
+
+
+@connect_app.command("notion")
+def connect_notion(
+    database: str = typer.Argument(..., help="Notion database id"),
+    workspace: str = typer.Option(..., "--workspace"),
+    tags: str = typer.Option(None, "--tags"),
+    config_path: str = typer.Option("config.yaml", "--config"),
+):
+    """Ingest a Notion database (token from server config; explicit only)."""
+    from .connectors.notion import NotionConnector
+
+    cfg = load_config(config_path)
+    _connect_saas(cfg, workspace, NotionConnector(database, token=cfg.notion_token, tags=parse_tags(tags)), tags)
+
+
+@connect_app.command("sharepoint")
+def connect_sharepoint(
+    site: str = typer.Argument(..., help="SharePoint site id"),
+    workspace: str = typer.Option(..., "--workspace"),
+    tags: str = typer.Option(None, "--tags"),
+    config_path: str = typer.Option("config.yaml", "--config"),
+):
+    """Ingest a SharePoint site's document library (MS Graph token; explicit only)."""
+    from .connectors.sharepoint import SharePointConnector
+
+    cfg = load_config(config_path)
+    _connect_saas(cfg, workspace, SharePointConnector(site, token=cfg.microsoft_token, tags=parse_tags(tags)), tags)
+
+
+@connect_app.command("onedrive")
+def connect_onedrive(
+    folder: str = typer.Argument("", help="OneDrive folder path (blank = root)"),
+    workspace: str = typer.Option(..., "--workspace"),
+    tags: str = typer.Option(None, "--tags"),
+    config_path: str = typer.Option("config.yaml", "--config"),
+):
+    """Ingest a OneDrive folder (MS Graph token; explicit only)."""
+    from .connectors.onedrive import OneDriveConnector
+
+    cfg = load_config(config_path)
+    _connect_saas(cfg, workspace, OneDriveConnector(folder, token=cfg.microsoft_token, tags=parse_tags(tags)), tags)
+
+
 def _setup_logging(verbose: bool) -> None:
     logging.basicConfig(
         level=logging.DEBUG if verbose else logging.INFO,
