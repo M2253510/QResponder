@@ -26,7 +26,7 @@ PROVIDER_SPECS = {
         "base_url": "https://generativelanguage.googleapis.com/v1beta/openai/",
         "key_field": "gemini_api_key",
         "models": {"type": "openai", "url": "https://generativelanguage.googleapis.com/v1beta/openai/models"},
-        "default_model": "gemini-1.5-pro",
+        "default_model": "gemini-2.5-flash",
     },
     "deepseek": {
         "label": "DeepSeek",
