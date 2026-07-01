@@ -1,32 +1,57 @@
-"""Google Drive connector (Phase 10 B) — OPTIONAL, extras-gated.
+"""Google Drive connector (Phase 10 B; OAuth in Phase 12) — extras-gated, offline-tested.
 
-Uses the user's own OAuth to download files from a Drive folder to the host. The
-Google libraries are an optional `connectors` extra so the phase isn't blocked on
-OAuth; the pluggable `Connector` interface lets Confluence/Notion be community-
-added the same way.
+Downloads text documents from one user-specified Drive folder using the user's own
+OAuth access token (obtained via the browser sign-in flow; server-side only, never
+sent to the browser). The Google client is lazy-imported from the `connectors`
+extra; the client is injectable so tests run offline. Runs only on explicit
+`connect gdrive`.
 """
 
 from __future__ import annotations
 
-from .base import Connector, ConnectorError, SourceDoc
+from .base import ConnectorError, TokenConnector
 
 
-class GoogleDriveConnector(Connector):
-    def __init__(self, folder_id: str, tags=None, credentials_path: str | None = None):
-        self.folder_id = folder_id
-        self.tags = list(tags or [])
-        self.credentials_path = credentials_path
+class GoogleDriveConnector(TokenConnector):
+    service = "Google Drive"
+    env_hint = "sign in with Google (OAuth) or set a token in server config"
+    default_ext = ".txt"
 
-    def fetch(self) -> list[SourceDoc]:  # pragma: no cover - requires OAuth + network
+    def __init__(self, folder_id: str, token=None, tags=None, client=None,
+                 timeout: int = 15, max_items: int = 200):
+        super().__init__(folder_id, token=token, tags=tags, client=client,
+                         timeout=timeout, max_items=max_items)
+
+    def _make_client(self):  # pragma: no cover - real network/SDK path
         try:
-            from google.oauth2.credentials import Credentials  # noqa: F401
-            from googleapiclient.discovery import build  # noqa: F401
+            from google.oauth2.credentials import Credentials
+            from googleapiclient.discovery import build
         except ImportError as exc:
             raise ConnectorError(
-                'Google Drive support needs the optional extra: pip install "qresponder[connectors]" '
-                "and configure your own OAuth credentials."
+                'Google Drive needs the optional extra: pip install "qresponder[connectors]".'
             ) from exc
-        raise ConnectorError(
-            "Google Drive connector requires OAuth setup; see README. The interface is "
-            "ready — supply credentials to enable it."
-        )
+        drive = build("drive", "v3", credentials=Credentials(token=self.token), cache_discovery=False)
+
+        def _client(folder_id: str):
+            docs, page = [], None
+            q = f"'{folder_id}' in parents and trashed = false" if folder_id else "trashed = false"
+            while len(docs) < self.max_items:
+                resp = drive.files().list(q=q, pageSize=50, pageToken=page,
+                                          fields="nextPageToken, files(id, name, mimeType)").execute()
+                for f in resp.get("files", []):
+                    mime = f.get("mimeType", "")
+                    if mime == "application/vnd.google-apps.document":
+                        data = drive.files().export(fileId=f["id"], mimeType="text/plain").execute()
+                    elif mime.startswith("text/") or mime in ("application/rtf",):
+                        data = drive.files().get_media(fileId=f["id"]).execute()
+                    else:
+                        continue
+                    text = data.decode("utf-8", "replace") if isinstance(data, bytes) else str(data)
+                    docs.append({"name": f.get("name"), "text": text,
+                                 "url": f"https://drive.google.com/file/d/{f['id']}"})
+                page = resp.get("nextPageToken")
+                if not page:
+                    break
+            return docs
+
+        return _client

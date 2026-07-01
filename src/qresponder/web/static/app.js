@@ -814,15 +814,61 @@ function connectPanel(wid) {
     el("span", { style: "color:var(--accent)" }, icon("plug")), el("h2", { style: "margin:0" }, "Connect a source")),
     el("p", { class: "muted" }, "Pull documents from where they live into this workspace's KB. Credentials stay server-side in .env; connectors run only when you click Connect — never during answering."));
   const sel = el("select", { "aria-label": "Connector type" });
+  const authHost = el("div", {});
   const fieldsHost = el("div", {});
   const tags = el("input", { class: "tagedit", placeholder: "tags (optional)" });
   const status = el("div", {});
   const connectBtn = el("button", { class: "btn primary" }, "Connect");
   let conns = [];
   const spec = () => conns.find((c) => c.type === sel.value);
+  const reload = () => api("/api/connectors").then((list) => { conns = list; renderFields(); });
+
+  function renderAuth(c) {
+    authHost.replaceChildren();
+    if (!c.oauth) {
+      if (c.needs_cred && !c.configured)
+        authHost.append(el("div", { class: "warn-banner" }, `Credential not set — add ${c.cred_hint || "the token"} on the server, then Connect.`));
+      return true; // no oauth gate
+    }
+    if (!c.oauth_configured) {
+      authHost.append(el("div", { class: "warn-banner" },
+        `${c.label} sign-in isn't set up yet. Register an OAuth app and set its client id/secret in .env (redirect URI: this server + /api/oauth/callback). You can also paste a personal token in .env instead.`));
+      return c.configured; // may still be usable via a static .env token
+    }
+    if (c.oauth_connected) {
+      authHost.append(el("div", { class: "rail" },
+        el("span", { class: "rail-src" }, "signed in"),
+        el("div", { style: "display:flex;gap:10px;align-items:center" },
+          el("span", { class: "chip done" }, el("span", { class: "dot" }), `Signed in with ${c.label}`),
+          el("button", { class: "btn ghost sm", onclick: async () => {
+            await api(`/api/oauth/${c.oauth_provider}`, { method: "DELETE" }); toast(`Disconnected ${c.label}.`); reload();
+          } }, "Disconnect"))));
+      return true;
+    }
+    // Configured but not signed in → the Sign-in button.
+    const signIn = el("button", { class: "btn primary", onclick: async () => {
+      try {
+        const { authorize_url } = await api(`/api/oauth/${c.oauth_provider}/start`);
+        const w = window.open(authorize_url, "qr-oauth", "width=560,height=720");
+        toast(`Opened ${c.label} sign-in — approve, then come back.`);
+        const onMsg = (ev) => { if (ev.data === "qr-oauth-done") { window.removeEventListener("message", onMsg); clearInterval(poll); reload(); } };
+        window.addEventListener("message", onMsg);
+        // Fallback: poll status in case the popup can't postMessage back.
+        const poll = setInterval(async () => {
+          const st = await api("/api/oauth/status").catch(() => []);
+          if ((st.find((x) => x.provider === c.oauth_provider) || {}).connected) { clearInterval(poll); window.removeEventListener("message", onMsg); reload(); }
+          if (w && w.closed) { clearInterval(poll); }
+        }, 2000);
+      } catch (e) { toast(e.message, "bad"); }
+    } }, icon("plug"), `Sign in with ${c.label}`);
+    authHost.append(el("div", { class: "btn-row" }, signIn,
+      el("span", { class: "muted" }, "You'll approve access in a new tab. Your token is stored on the server, never in this page.")));
+    return false; // gate Connect until signed in
+  }
 
   function renderFields() {
     const c = spec(); if (!c) return;
+    const ready = renderAuth(c);
     const inputs = {};
     fieldsHost.replaceChildren(...c.fields.map((f) => {
       const inp = el("input", { type: f.type === "number" ? "number" : "text", placeholder: f.label,
@@ -831,9 +877,9 @@ function connectPanel(wid) {
       return el("label", { class: "field" }, f.label, inp);
     }));
     fieldsHost._inputs = inputs;
-    if (c.needs_cred && !c.configured)
-      status.replaceChildren(el("div", { class: "warn-banner" }, `Credential not set — add ${c.cred_hint || "the token"} on the server, then Connect.`));
-    else status.replaceChildren();
+    connectBtn.disabled = !ready;
+    connectBtn.title = ready ? "" : "Sign in first";
+    status.replaceChildren();
   }
   connectBtn.addEventListener("click", async () => {
     const c = spec(); if (!c) return;
@@ -851,12 +897,14 @@ function connectPanel(wid) {
   sel.addEventListener("change", renderFields);
   api("/api/connectors").then((list) => {
     conns = list;
-    sel.replaceChildren(...list.map((c) => el("option", { value: c.type },
-      c.label + (c.needs_cred ? (c.configured ? " ✓" : " (set token)") : ""))));
+    sel.replaceChildren(...list.map((c) => {
+      const mark = c.oauth ? (c.oauth_connected ? " ✓" : "") : (c.needs_cred ? (c.configured ? " ✓" : "") : "");
+      return el("option", { value: c.type }, c.label + mark);
+    }));
     renderFields();
   }).catch(() => card.append(el("div", { class: "muted" }, "Connectors unavailable.")));
   card.append(el("div", { class: "row" }, el("label", { class: "field" }, "Source", sel), el("label", { class: "field" }, "Tags", tags)),
-    fieldsHost, el("div", { class: "btn-row" }, connectBtn), status);
+    authHost, fieldsHost, el("div", { class: "btn-row" }, connectBtn), status);
   return card;
 }
 

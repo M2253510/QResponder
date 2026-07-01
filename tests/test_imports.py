@@ -55,6 +55,7 @@ def test_no_top_level_retrieval_deps():
             "qresponder.connectors.folder",
             "qresponder.connectors.website",
             "qresponder.connectors.gdrive",
+            "qresponder.connectors.oauth",
             "qresponder.connectors.confluence",
             "qresponder.connectors.notion",
             "qresponder.connectors.sharepoint",

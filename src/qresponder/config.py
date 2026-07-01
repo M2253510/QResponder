@@ -57,6 +57,17 @@ class Config(BaseModel):
     notion_token: str = ""
     microsoft_token: str = ""  # MS Graph token for SharePoint + OneDrive
 
+    # OAuth app credentials (Phase 12) — register an app per provider once; the
+    # client SECRET stays server-side and the resulting access token is never sent
+    # to the browser. Used only by an explicit `connect`, never during answering.
+    notion_client_id: str = ""
+    notion_client_secret: str = ""
+    google_client_id: str = ""
+    google_client_secret: str = ""
+    confluence_client_id: str = ""
+    confluence_client_secret: str = ""
+    oauth_redirect_base: str = "http://127.0.0.1:8000"
+
     # Local / generic OpenAI-compatible path (Ollama / vLLM / LM Studio / OpenRouter)
     llm_base_url: str = "http://localhost:11434/v1"
     llm_api_key: str = "ollama"
@@ -156,6 +167,13 @@ _ENV_MAP = {
     "CONFLUENCE_EMAIL": "confluence_email",
     "NOTION_TOKEN": "notion_token",
     "MICROSOFT_TOKEN": "microsoft_token",
+    "NOTION_CLIENT_ID": "notion_client_id",
+    "NOTION_CLIENT_SECRET": "notion_client_secret",
+    "GOOGLE_CLIENT_ID": "google_client_id",
+    "GOOGLE_CLIENT_SECRET": "google_client_secret",
+    "CONFLUENCE_CLIENT_ID": "confluence_client_id",
+    "CONFLUENCE_CLIENT_SECRET": "confluence_client_secret",
+    "OAUTH_REDIRECT_BASE": "oauth_redirect_base",
     "LLM_BASE_URL": "llm_base_url",
     "LLM_API_KEY": "llm_api_key",
     "LLM_MODEL": "llm_model",

@@ -121,6 +121,14 @@ def create_app(config: Config | None = None, model_fetch=None) -> FastAPI:
     app.state.model_fetch = model_fetch  # injectable HTTP fetcher for model lists (tests)
     store = WorkspaceStore(config.extra.get("workspaces_dir") or config.workspaces_dir)
     app.state.store = store
+    # OAuth: server-side token store + in-memory pending-flow registry (state -> flow).
+    from ..connectors.oauth import TokenStore
+
+    _oauth_dir = config.extra.get("oauth_dir") or (Path(config.extra.get("workspaces_dir") or config.workspaces_dir) / ".oauth")
+    oauth_tokens = TokenStore(_oauth_dir)
+    app.state.oauth_tokens = oauth_tokens
+    oauth_pending: dict[str, dict] = {}
+    app.state.oauth_fetch = None  # injectable token-exchange HTTP fetcher (tests)
 
     # ---- run machinery (shared by legacy + workspace runs) -----------------
     def _emit(job: _Job, event: dict):
@@ -310,10 +318,84 @@ def create_app(config: Config | None = None, model_fetch=None) -> FastAPI:
     def tag_kb(wid: str, filename: str, body: dict = Body(...)):
         return {"files": _set_tags(_ws(wid).kb_dir, filename, body.get("tags"))}
 
+    # ---- OAuth login for connectors (Notion / Google Drive / Confluence) -----
+    @app.get("/api/oauth/status")
+    def oauth_status():
+        """Which OAuth providers have an app configured, and which are connected.
+        Never returns a client secret or an access token."""
+        from ..connectors.oauth import OAUTH_SPECS, is_configured
+
+        return [{"provider": p, "label": spec["label"],
+                 "configured": is_configured(config, p), "connected": oauth_tokens.has(p)}
+                for p, spec in OAUTH_SPECS.items()]
+
+    @app.get("/api/oauth/{provider}/start")
+    def oauth_start(provider: str):
+        """Begin the Authorization Code + PKCE flow — returns the provider authorize
+        URL for the browser to open. The client secret never leaves the server."""
+        from ..connectors.oauth import (OAUTH_SPECS, authorize_url, client_credentials,
+                                         make_pkce, make_state)
+
+        if provider not in OAUTH_SPECS:
+            raise HTTPException(status_code=404, detail="unknown OAuth provider")
+        client_id, secret = client_credentials(config, provider)
+        if not (client_id and secret):
+            raise HTTPException(status_code=400,
+                                detail=f"{OAUTH_SPECS[provider]['label']} OAuth app not configured — set its client id/secret in .env.")
+        state = make_state()
+        verifier, challenge = make_pkce()
+        redirect_uri = config.oauth_redirect_base.rstrip("/") + "/api/oauth/callback"
+        oauth_pending[state] = {"provider": provider, "verifier": verifier}
+        return {"authorize_url": authorize_url(provider, client_id, redirect_uri, state, challenge)}
+
+    @app.get("/api/oauth/callback")
+    def oauth_callback(code: str = "", state: str = "", error: str = ""):
+        """Provider redirect target: validate state, exchange the code for a token,
+        store it server-side, and return a tiny self-closing page."""
+        from fastapi.responses import HTMLResponse
+
+        from ..connectors.oauth import client_credentials, exchange_code
+
+        def _page(msg: str, ok: bool) -> HTMLResponse:
+            color = "#2ea85c" if ok else "#e8455f"
+            return HTMLResponse(
+                f"<!doctype html><meta charset=utf-8><body style='font-family:system-ui;background:#0c0f14;color:#e7edf6;"
+                f"display:grid;place-items:center;height:100vh;margin:0'>"
+                f"<div style='text-align:center'><div style='color:{color};font-size:20px'>{msg}</div>"
+                f"<p style='color:#93a1b2'>You can close this tab and return to QRESPONDER.</p></div>"
+                f"<script>try{{window.opener&&window.opener.postMessage('qr-oauth-done','*')}}catch(e){{}}</script></body>")
+
+        if error:
+            return _page(f"Sign-in failed: {error}", False)
+        flow = oauth_pending.pop(state, None)
+        if not flow:
+            return _page("Sign-in expired or invalid (state mismatch). Try again.", False)
+        provider = flow["provider"]
+        client_id, secret = client_credentials(config, provider)
+        redirect_uri = config.oauth_redirect_base.rstrip("/") + "/api/oauth/callback"
+        try:
+            token = exchange_code(provider, code, client_id, secret, redirect_uri,
+                                  flow["verifier"], fetch=app.state.oauth_fetch)
+        except Exception as exc:  # noqa: BLE001
+            return _page(f"Sign-in failed: {exc}", False)
+        oauth_tokens.save(provider, token)  # server-side only
+        return _page("Connected ✓", True)
+
+    @app.delete("/api/oauth/{provider}")
+    def oauth_disconnect(provider: str):
+        oauth_tokens.forget(provider)
+        return {"provider": provider, "connected": False}
+
     @app.get("/api/connectors")
     def list_connectors():
         """Available source connectors + the fields each needs. Reports whether the
-        server-side credential is set — but NEVER returns the credential itself."""
+        server-side credential / OAuth app is set and (for OAuth) whether the user has
+        signed in — but NEVER returns a credential, secret, or token."""
+        from ..connectors.oauth import is_configured as oauth_configured
+
+        def oa(p):
+            return {"oauth": True, "oauth_provider": p, "oauth_configured": oauth_configured(config, p),
+                    "oauth_connected": oauth_tokens.has(p)}
         return [
             {"type": "folder", "label": "Folder", "fields": [{"name": "path", "label": "Folder path"}],
              "configured": True, "needs_cred": False},
@@ -321,17 +403,21 @@ def create_app(config: Config | None = None, model_fetch=None) -> FastAPI:
              "fields": [{"name": "url", "label": "Start URL"}, {"name": "depth", "label": "Depth", "type": "number"},
                         {"name": "max_pages", "label": "Max pages", "type": "number"}]},
             {"type": "confluence", "label": "Confluence", "needs_cred": True,
-             "configured": bool(config.confluence_token and config.confluence_base_url),
+             "configured": bool(oauth_tokens.has("confluence") or (config.confluence_token and config.confluence_base_url)),
              "fields": [{"name": "space", "label": "Space key"}],
-             "cred_hint": "confluence_token + confluence_base_url in .env"},
-            {"type": "notion", "label": "Notion", "needs_cred": True, "configured": bool(config.notion_token),
-             "fields": [{"name": "database", "label": "Database id"}], "cred_hint": "notion_token in .env"},
+             "cred_hint": "Sign in with Confluence, or set confluence_token + confluence_base_url in .env", **oa("confluence")},
+            {"type": "notion", "label": "Notion", "needs_cred": True,
+             "configured": bool(oauth_tokens.has("notion") or config.notion_token),
+             "fields": [{"name": "database", "label": "Database id"}],
+             "cred_hint": "Sign in with Notion, or set notion_token in .env", **oa("notion")},
             {"type": "sharepoint", "label": "SharePoint", "needs_cred": True, "configured": bool(config.microsoft_token),
              "fields": [{"name": "site", "label": "Site id"}], "cred_hint": "microsoft_token in .env"},
             {"type": "onedrive", "label": "OneDrive", "needs_cred": True, "configured": bool(config.microsoft_token),
              "fields": [{"name": "folder", "label": "Folder path (blank = root)"}], "cred_hint": "microsoft_token in .env"},
-            {"type": "gdrive", "label": "Google Drive", "needs_cred": True, "configured": False,
-             "fields": [{"name": "folder_id", "label": "Folder id"}], "cred_hint": "OAuth via the connectors extra"},
+            {"type": "gdrive", "label": "Google Drive", "needs_cred": True,
+             "configured": bool(oauth_tokens.has("gdrive")),
+             "fields": [{"name": "folder_id", "label": "Folder id (blank = My Drive root)"}],
+             "cred_hint": "Sign in with Google", **oa("gdrive")},
         ]
 
     @app.post("/api/workspaces/{wid}/connect")
@@ -342,7 +428,7 @@ def create_app(config: Config | None = None, model_fetch=None) -> FastAPI:
 
         ws = _ws(wid)
         kind = str(body.get("type", "")).lower()
-        tags = parse_tags(body.get("tags"))
+        tags = normalize_tags(body.get("tags"))  # accepts a list (UI) or comma string
         try:
             if kind == "folder":
                 from ..connectors.folder import FolderConnector
@@ -357,16 +443,20 @@ def create_app(config: Config | None = None, model_fetch=None) -> FastAPI:
             elif kind == "gdrive":
                 from ..connectors.gdrive import GoogleDriveConnector
 
-                conn = GoogleDriveConnector(str(body.get("folder_id", "")), tags=tags)
+                conn = GoogleDriveConnector(str(body.get("folder_id", "")),
+                                            token=oauth_tokens.access_token("gdrive"), tags=tags)
             elif kind == "confluence":
                 from ..connectors.confluence import ConfluenceConnector
 
-                conn = ConfluenceConnector(str(body.get("space", "")), token=config.confluence_token,
+                # Prefer an OAuth token (from the browser sign-in) over a static .env token.
+                conn = ConfluenceConnector(str(body.get("space", "")),
+                                           token=oauth_tokens.access_token("confluence") or config.confluence_token,
                                            base_url=config.confluence_base_url, email=config.confluence_email, tags=tags)
             elif kind == "notion":
                 from ..connectors.notion import NotionConnector
 
-                conn = NotionConnector(str(body.get("database", "")), token=config.notion_token, tags=tags)
+                conn = NotionConnector(str(body.get("database", "")),
+                                       token=oauth_tokens.access_token("notion") or config.notion_token, tags=tags)
             elif kind == "sharepoint":
                 from ..connectors.sharepoint import SharePointConnector
 
