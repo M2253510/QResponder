@@ -483,20 +483,30 @@ function auditBlock(a) {
 // ============================================================================
 function kbPage(view, wid) {
   view.append(el("div", { class: "page-head" }, el("h1", {}, "Knowledge Base"),
-    el("div", { class: "sub" }, "Manage your Q&A entries, review flagged questions, and resolve duplicates.")));
+    el("div", { class: "sub" }, "Manage Q&A entries, connect a source, review flagged questions, and resolve duplicates.")));
   const sub = el("div", { class: "subtabs" });
   const body = el("div", {});
   const tab = (key, label) => el("div", { class: "subtab" + (kbPage._t === key ? " active" : ""), onclick: () => { kbPage._t = key; render(); } }, label);
   function render() {
-    sub.replaceChildren(tab("entries", "Entries"), tab("flagged", "Flagged"), tab("duplicates", "Duplicates"));
+    sub.replaceChildren(tab("entries", "Entries"), tab("documents", "Documents & sources"),
+      tab("flagged", "Flagged"), tab("duplicates", "Duplicates"));
     body.replaceChildren();
-    if (kbPage._t === "flagged") flaggedTab(body, wid);
+    if (kbPage._t === "documents") documentsTab(body, wid);
+    else if (kbPage._t === "flagged") flaggedTab(body, wid);
     else if (kbPage._t === "duplicates") duplicatesTab(body, wid);
     else entriesTab(body, wid);
   }
   kbPage._t = kbPage._t || "entries";
   view.append(sub, body);
   render();
+}
+
+// --- Tab: Documents & sources (upload files + connect Confluence/Notion/etc.) ---
+function documentsTab(host, wid) {
+  host.append(el("div", { class: "card" }, el("h2", {}, "Knowledge base documents"),
+    el("p", { class: "muted" }, "Cited when answering. Drop files, or connect a source below. Tag docs to scope which answer which questionnaire."),
+    assetManager(wid, "kb")));
+  host.append(connectPanel(wid));
 }
 
 // --- Tab 1: Entries ---
@@ -763,10 +773,10 @@ async function settingsPage(view, wid) {
     el("p", { class: "muted" }, "Provider and key live in .env on the server — never in this page. Local models need no key."),
     el("div", { class: "btn-row" }, el("button", { class: "btn", onclick: async () => { dres.textContent = "Testing…"; await refreshDoctor(); await refreshStatus(); dres.replaceChildren(S.doctor?.ok ? el("span", { class: "ok-msg" }, "✓ reachable") : el("div", { class: "error" }, "✗ not reachable — check .env")); } }, "Test connection")), dres));
 
-  // KB docs + evidence
-  view.append(el("div", { class: "card" }, el("h2", {}, "Knowledge base documents"),
-    el("p", { class: "muted" }, "Cited when answering. Tag docs to scope which answer which questionnaire."), assetManager(wid, "kb")));
-  view.append(connectPanel(wid));
+  // Evidence lives here; KB documents + source connectors moved to Knowledge Base ▸ Documents & sources.
+  view.append(el("div", { class: "card" }, el("h2", {}, "Knowledge base & sources"),
+    el("p", { class: "muted" }, "Manage KB documents and connect Confluence / Notion / SharePoint / OneDrive from "),
+    el("div", { class: "btn-row" }, el("button", { class: "btn", onclick: () => { kbPage._t = "documents"; go("kb"); } }, "Knowledge Base ▸ Documents & sources"))));
   view.append(el("div", { class: "card" }, el("h2", {}, "Evidence vault"),
     el("p", { class: "muted" }, "Attached to “please attach…” questions; not used as answer text."), assetManager(wid, "evidence")));
 
