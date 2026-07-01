@@ -159,3 +159,33 @@ def test_confluence_oauth_resolves_cloud_id_and_connect_uses_it(tmp_path, monkey
     r = client.post(f"/api/workspaces/{wid}/connect", json={"type": "confluence", "space": "ENG"})
     assert r.status_code == 200 and len(r.json()["accepted"]) == 1
     assert captured["token"] == "cf-oauth-tok" and captured["cloud_id"] == "cloud-123"
+
+
+def test_confluence_list_spaces_offline():
+    from qresponder.connectors.confluence import list_spaces
+
+    calls = []
+    def fake(cloud_id, token, path):
+        calls.append(path)
+        if "start=0" in path:
+            return {"results": [{"key": "ENG", "name": "Engineering"}, {"key": "SEC", "name": "Security"}]}
+        return {"results": []}
+    spaces = list_spaces("tok", "cloud-1", fetch=fake)
+    assert {s["key"] for s in spaces} == {"ENG", "SEC"}
+    assert spaces[0]["name"] == "Engineering"
+
+
+def test_web_confluence_spaces_requires_signin_then_lists(tmp_path):
+    app, client = _client(tmp_path, confluence_client_id="cid", confluence_client_secret="sec")
+    # Not signed in yet → clear 400.
+    assert client.get("/api/connectors/confluence/spaces").status_code == 400
+    # Sign in, then inject the Confluence space-listing fetch.
+    app.state.oauth_fetch = lambda url, data, headers: {"access_token": "cf"}
+    app.state.oauth_cloud_fetch = lambda url, headers: [{"id": "cloud-9"}]
+    start = client.get("/api/oauth/confluence/start").json()
+    state = parse_qs(urlparse(start["authorize_url"]).query)["state"][0]
+    client.get(f"/api/oauth/callback?code=abc&state={state}")
+    app.state.confluence_fetch = lambda cloud_id, token, path: {"results": [{"key": "ENG", "name": "Engineering"}]}
+    r = client.get("/api/connectors/confluence/spaces")
+    assert r.status_code == 200
+    assert r.json()["spaces"][0]["key"] == "ENG"

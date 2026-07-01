@@ -11,6 +11,32 @@ from __future__ import annotations
 from .base import ConnectorError, TokenConnector
 
 
+def _cloud_get(cloud_id: str, token: str, path: str, timeout: int = 15):  # pragma: no cover - real network
+    import json
+    import urllib.request
+
+    url = f"https://api.atlassian.com/ex/confluence/{cloud_id}/rest/api{path}"
+    req = urllib.request.Request(url, headers={"Authorization": f"Bearer {token}", "Accept": "application/json"})
+    with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310
+        return json.loads(resp.read().decode("utf-8"))
+
+
+def list_spaces(token: str, cloud_id: str, fetch=None, max_spaces: int = 500) -> list[dict]:
+    """List the spaces the signed-in user can see: [{key, name}]. `fetch(cloud_id,
+    token, path) -> dict` is injectable so tests stay offline."""
+    fetch = fetch or _cloud_get
+    spaces, start, limit = [], 0, 50
+    while len(spaces) < max_spaces:
+        data = fetch(cloud_id, token, f"/space?limit={limit}&start={start}")
+        results = data.get("results", [])
+        for s in results:
+            spaces.append({"key": s.get("key"), "name": s.get("name") or s.get("key")})
+        if len(results) < limit:
+            break
+        start += limit
+    return spaces
+
+
 class ConfluenceConnector(TokenConnector):
     service = "Confluence"
     env_hint = "set confluence_token (+ confluence_base_url, confluence_email) in .env"

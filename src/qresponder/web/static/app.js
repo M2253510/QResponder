@@ -869,17 +869,41 @@ function connectPanel(wid) {
   function renderFields() {
     const c = spec(); if (!c) return;
     const ready = renderAuth(c);
-    const inputs = {};
-    fieldsHost.replaceChildren(...c.fields.map((f) => {
-      const inp = el("input", { type: f.type === "number" ? "number" : "text", placeholder: f.label,
-        value: f.name === "depth" ? "1" : f.name === "max_pages" ? "20" : "" });
-      inputs[f.name] = inp;
-      return el("label", { class: "field" }, f.label, inp);
-    }));
-    fieldsHost._inputs = inputs;
+    // Confluence + signed in → offer a space PICKER (choose "Engineering" by name)
+    // and a page limit, instead of a raw space-key text field.
+    if (c.type === "confluence" && c.oauth_connected) { renderConfluencePicker(); }
+    else {
+      const inputs = {};
+      fieldsHost.replaceChildren(...c.fields.map((f) => {
+        const inp = el("input", { type: f.type === "number" ? "number" : "text", placeholder: f.label,
+          value: f.name === "depth" ? "1" : f.name === "max_pages" ? "20" : "" });
+        inputs[f.name] = inp;
+        return el("label", { class: "field" }, f.label, inp);
+      }));
+      fieldsHost._inputs = inputs;
+    }
     connectBtn.disabled = !ready;
     connectBtn.title = ready ? "" : "Sign in first";
     status.replaceChildren();
+  }
+
+  function renderConfluencePicker() {
+    const spaceSel = el("select", { "aria-label": "Confluence space" }, el("option", { value: "" }, "Loading spaces…"));
+    const spaceKey = el("input", { placeholder: "or type a space key (e.g. ENG)" });
+    const maxItems = el("input", { type: "number", value: "500", min: "1", "aria-label": "Max pages" });
+    // Effective space = the picked one, else the typed fallback.
+    fieldsHost._inputs = { space: { get value() { return spaceSel.value || spaceKey.value; } },
+                           max_items: maxItems };
+    fieldsHost.replaceChildren(
+      el("label", { class: "field" }, "Space (pulls the whole space)", spaceSel),
+      el("div", { class: "row" },
+        el("label", { class: "field" }, "Or space key", spaceKey),
+        el("label", { class: "field" }, "Max pages", maxItems)));
+    api("/api/connectors/confluence/spaces").then(({ spaces }) => {
+      if (!spaces || !spaces.length) { spaceSel.replaceChildren(el("option", { value: "" }, "No spaces found — type a key")); return; }
+      spaceSel.replaceChildren(el("option", { value: "" }, "Select a space…"),
+        ...spaces.map((s) => el("option", { value: s.key }, `${s.name} (${s.key})`)));
+    }).catch((e) => { spaceSel.replaceChildren(el("option", { value: "" }, "Couldn't list spaces — type a key")); toast(e.message, "bad"); });
   }
   connectBtn.addEventListener("click", async () => {
     const c = spec(); if (!c) return;

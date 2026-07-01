@@ -130,6 +130,7 @@ def create_app(config: Config | None = None, model_fetch=None) -> FastAPI:
     oauth_pending: dict[str, dict] = {}
     app.state.oauth_fetch = None  # injectable token-exchange HTTP fetcher (tests)
     app.state.oauth_cloud_fetch = None  # injectable Atlassian cloud-id fetcher (tests)
+    app.state.confluence_fetch = None  # injectable Confluence Cloud GET (space listing; tests)
 
     # ---- run machinery (shared by legacy + workspace runs) -----------------
     def _emit(job: _Job, event: dict):
@@ -398,6 +399,20 @@ def create_app(config: Config | None = None, model_fetch=None) -> FastAPI:
         oauth_tokens.forget(provider)
         return {"provider": provider, "connected": False}
 
+    @app.get("/api/connectors/confluence/spaces")
+    def confluence_spaces():
+        """List the Confluence spaces the signed-in user can see, so the UI can offer
+        a space picker (choose 'Engineering' by name instead of typing a key)."""
+        from ..connectors.confluence import list_spaces
+
+        tok = oauth_tokens.load("confluence") or {}
+        if not (tok.get("access_token") and tok.get("cloud_id")):
+            raise HTTPException(status_code=400, detail="Sign in with Confluence first.")
+        try:
+            return {"spaces": list_spaces(tok["access_token"], tok["cloud_id"], fetch=app.state.confluence_fetch)}
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(status_code=502, detail=f"Couldn't list spaces: {exc}")
+
     @app.get("/api/connectors")
     def list_connectors():
         """Available source connectors + the fields each needs. Reports whether the
@@ -465,7 +480,8 @@ def create_app(config: Config | None = None, model_fetch=None) -> FastAPI:
                 conn = ConfluenceConnector(str(body.get("space", "")),
                                            token=_cf.get("access_token") or config.confluence_token,
                                            base_url=config.confluence_base_url, email=config.confluence_email,
-                                           cloud_id=_cf.get("cloud_id"), tags=tags)
+                                           cloud_id=_cf.get("cloud_id"), tags=tags,
+                                           max_items=int(body.get("max_items", 200)))
             elif kind == "notion":
                 from ..connectors.notion import NotionConnector
 
