@@ -10,6 +10,8 @@ is left as-is for the human rather than forced.
 
 from __future__ import annotations
 
+import re
+
 from ..models import AnswerResult, AnswerType, Status
 
 
@@ -26,7 +28,9 @@ def coerce_to_options(value: str, options: list[str]) -> str | None:
         if vlow.startswith(opt.lower()):
             return opt
     for opt in options:
-        if opt.lower() in vlow:
+        # Word-boundary match so a short option ("No") doesn't match inside a longer
+        # word ("know" / "not") — only as a standalone token.
+        if re.search(rf"\b{re.escape(opt.lower())}\b", vlow):
             return opt
     return None
 

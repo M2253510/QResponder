@@ -21,6 +21,10 @@ def test_coerce_to_options():
     assert coerce_to_options("No.", ["Yes", "No"]) == "No"
     assert coerce_to_options("Partially compliant", ["Compliant", "Non-compliant", "Partial"]) == "Partial"
     assert coerce_to_options("totally unrelated", ["Yes", "No"]) is None  # no forced map
+    # Word-boundary: a short option must not match inside a longer word.
+    assert coerce_to_options("We do not know the retention period.", ["Yes", "No"]) is None
+    assert coerce_to_options("Currently unknown, needs review.", ["Yes", "No"]) is None
+    assert coerce_to_options("The answer is no, not supported.", ["Yes", "No"]) == "No"  # standalone token
 
 
 def _answered(answer, atype):
