@@ -52,6 +52,7 @@ def test_no_top_level_retrieval_deps():
             "qresponder.core.qa_import",
             "qresponder.core.stats",
             "qresponder.core.connections",
+            "qresponder.core.insights",
             "qresponder.connectors.base",
             "qresponder.connectors.folder",
             "qresponder.connectors.website",

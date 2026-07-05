@@ -560,6 +560,30 @@ def stats(
     typer.echo(f"  time saved: ~{s['time_saved_minutes']} min  ({s['time_saved_note']})")
 
 
+@app.command(name="kb-insights")
+def kb_insights_cmd(
+    workspace: str = typer.Option(..., "--workspace", help="Workspace id"),
+    config_path: str = typer.Option("config.yaml", "--config"),
+):
+    """What your knowledge base can't yet answer — gaps from this workspace's runs."""
+    from .core.insights import kb_insights
+
+    cfg = load_config(config_path)
+    ws = _ws_kb_dir(cfg, workspace)
+    r = kb_insights(ws.runs_dir)
+    typer.secho(f"KB Insights — {r['n_runs']} run(s), {r['total_questions']} question(s), "
+                f"{r['abstain_rate'] * 100:.1f}% abstained", fg=typer.colors.GREEN)
+    if r["gaps_by_reason"]:
+        typer.echo("  Gaps by reason (what the KB couldn't answer):")
+        for g in r["gaps_by_reason"]:
+            typer.echo(f"    - {g['reason']}: {g['count']}  e.g. {g['examples'][0] if g['examples'] else ''}")
+    if r["gap_themes"]:
+        typer.echo("  Top gap themes: " + ", ".join(f"{t['theme']} ({t['count']})" for t in r["gap_themes"]))
+    if r["reused_tier1"]:
+        typer.echo(f"  Most-reused approved answers: {len(r['reused_tier1'])} (add more where gaps cluster)")
+    typer.secho(f"  → {r['note']}", fg=typer.colors.YELLOW)
+
+
 @app.command(name="kb-check")
 def kb_check_cmd(
     qa: str = typer.Option("qa.yaml", "--qa", help="Answer Library YAML to scan"),

@@ -777,6 +777,85 @@ def create_app(config: Config | None = None, model_fetch=None) -> FastAPI:
         ws = _ws(wid)
         return workspace_stats(ws.runs_dir, config.stats_minutes_per_question)
 
+    @app.get("/api/workspaces/{wid}/insights")
+    def ws_insights(wid: str):
+        """Knowledge-gap report from this workspace's run history. Local read only."""
+        from ..core.insights import kb_insights
+
+        return kb_insights(_ws(wid).runs_dir)
+
+    @app.get("/api/workspaces/{wid}/insights/export")
+    def ws_insights_export(wid: str, fmt: str = "json"):
+        import csv
+        import io
+        import json as _json
+
+        from fastapi.responses import Response
+
+        from ..core.insights import kb_insights
+
+        r = kb_insights(_ws(wid).runs_dir)
+        if (fmt or "json").lower() == "csv":
+            buf = io.StringIO()
+            w = csv.writer(buf)
+            w.writerow(["kind", "key", "count", "example"])
+            for g in r["gaps_by_reason"]:
+                w.writerow(["gap_reason", g["reason"], g["count"], (g["examples"][0] if g["examples"] else "")])
+            for t in r["gap_themes"]:
+                w.writerow(["gap_theme", t["theme"], t["count"], (t["examples"][0] if t["examples"] else "")])
+            for u in r["reused_tier1"]:
+                w.writerow(["reused_tier1", u["answer"], u["count"], ""])
+            return Response(buf.getvalue(), media_type="text/csv",
+                            headers={"Content-Disposition": 'attachment; filename="kb_insights.csv"'})
+        return Response(_json.dumps(r, indent=2), media_type="application/json",
+                        headers={"Content-Disposition": 'attachment; filename="kb_insights.json"'})
+
+    @app.get("/api/workspaces/{wid}/home")
+    def ws_home(wid: str):
+        """First-run home state — the setup checklist reflects REAL state (KB, ask, run)."""
+        import json as _json
+        from pathlib import Path as _P
+
+        from ..kb.library import AnswerLibrary
+
+        ws = _ws(wid)
+        kb_files = _list_dir(ws.kb_dir)
+        qa_count = len(AnswerLibrary.load(ws.qa_path).entries)
+        cats = sorted({(e.tags[0] if e.tags else "uncategorized") for e in AnswerLibrary.load(ws.qa_path).entries})
+        # asked flag (set by the ask endpoint), and run history from runs_dir.
+        activity = {}
+        act_path = ws.path / ".activity.json"
+        if act_path.exists():
+            try:
+                activity = _json.loads(act_path.read_text(encoding="utf-8"))
+            except (ValueError, OSError):
+                activity = {}
+        recent = []
+        if ws.runs_dir.exists():
+            run_dirs = [p for p in ws.runs_dir.iterdir() if p.is_dir()]
+            run_dirs.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+            for p in run_dirs[:5]:
+                summ = p / "batch_summary.json"
+                res = p / "results.json"
+                kind, n = ("batch", None), None
+                if summ.exists():
+                    try:
+                        n = _json.loads(summ.read_text(encoding="utf-8")).get("n_files")
+                    except Exception:  # noqa: BLE001
+                        n = None
+                    recent.append({"id": p.name, "type": "batch", "n_files": n})
+                elif res.exists():
+                    recent.append({"id": p.name, "type": "run"})
+        n_runs = len([1 for _ in ws.runs_dir.rglob("results.json")]) if ws.runs_dir.exists() else 0
+        steps = [
+            {"key": "document", "label": "Add a document to your knowledge base", "done": (len(kb_files) > 0 or qa_count > 0)},
+            {"key": "ask", "label": "Ask your first question", "done": bool(activity.get("asked"))},
+            {"key": "automate", "label": "Automate a questionnaire", "done": n_runs > 0},
+        ]
+        return {"kb_docs": len(kb_files), "qa_count": qa_count, "categories": cats,
+                "n_runs": n_runs, "recent_runs": recent,
+                "setup": {"steps": steps, "done": sum(1 for s in steps if s["done"]), "total": len(steps)}}
+
     @app.get("/api/workspaces/{wid}/kb-check")
     def kb_check(wid: str):
         from ..core.kb_health import check_library
@@ -1030,7 +1109,16 @@ def create_app(config: Config | None = None, model_fetch=None) -> FastAPI:
 
     @app.post("/api/workspaces/{wid}/ask")
     def ask(wid: str, body: dict = Body(...)):
-        return _run_single(wid, body)
+        result = _run_single(wid, body)
+        # Record that the workspace has been used for Ask (drives the home checklist).
+        try:
+            import json as _json
+
+            ws = _ws(wid)
+            (ws.path / ".activity.json").write_text(_json.dumps({"asked": True}), encoding="utf-8")
+        except Exception:  # noqa: BLE001 - activity tracking is best-effort, never blocks answering
+            pass
+        return result
 
     @app.post("/api/workspaces/{wid}/regenerate")
     def regenerate(wid: str, body: dict = Body(...)):
