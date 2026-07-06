@@ -55,6 +55,22 @@ OAUTH_SPECS: dict[str, dict] = {
         "client_auth": "post",
         "id_field": "confluence_client_id", "secret_field": "confluence_client_secret",
     },
+    "microsoft": {
+        "label": "Microsoft 365",
+        "authorize_url": "https://login.microsoftonline.com/common/oauth2/v2.0/authorize",
+        "token_url": "https://login.microsoftonline.com/common/oauth2/v2.0/token",
+        "scopes": ["Files.Read.All", "Sites.Read.All", "offline_access"],
+        "extra_authorize": {"prompt": "consent"},
+        "client_auth": "post",
+        "id_field": "microsoft_client_id", "secret_field": "microsoft_client_secret",
+    },
+}
+
+# Connection type → the OAuth provider it authenticates through (SharePoint and
+# OneDrive both ride Microsoft identity / Graph).
+CONNECTOR_OAUTH = {
+    "gdrive": "gdrive", "notion": "notion", "confluence": "confluence",
+    "sharepoint": "microsoft", "onedrive": "microsoft",
 }
 
 
@@ -127,6 +143,39 @@ def exchange_code(provider: str, code: str, client_id: str, client_secret: str,
     if not isinstance(resp, dict) or "access_token" not in resp:
         raise OAuthError(f"{spec['label']}: token exchange failed ({resp.get('error') if isinstance(resp, dict) else 'no token'}).")
     return resp
+
+
+def refresh_access_token(provider: str, refresh_tok: str, client_id: str, client_secret: str,
+                         fetch=None) -> dict:
+    """Use a refresh token to mint a fresh access token so long-lived connections
+    don't silently die. Providers may or may not rotate the refresh token — if the
+    response omits one, the caller keeps the existing refresh_token. Server-side only."""
+    spec = OAUTH_SPECS[provider]
+    if not refresh_tok:
+        raise OAuthError(f"{spec['label']}: no refresh token stored — reconnect.")
+    data = {"grant_type": "refresh_token", "refresh_token": refresh_tok, "client_id": client_id}
+    headers: dict = {}
+    if spec["client_auth"] == "basic":
+        token = base64.b64encode(f"{client_id}:{client_secret}".encode()).decode()
+        headers["Authorization"] = f"Basic {token}"
+    else:
+        data["client_secret"] = client_secret
+    if spec["scopes"]:
+        data["scope"] = " ".join(spec["scopes"])
+    resp = (fetch or _http_post_form)(spec["token_url"], data, headers)
+    if not isinstance(resp, dict) or "access_token" not in resp:
+        raise OAuthError(f"{spec['label']}: token refresh failed.")
+    return resp
+
+
+def is_auth_error(exc: Exception) -> bool:
+    """Heuristic: did a connector fetch fail because the access token expired (401)?
+    Kept string-based so it works across urllib / requests / SDK error shapes."""
+    code = getattr(exc, "code", None) or getattr(getattr(exc, "response", None), "status_code", None)
+    if code in (401, 403):
+        return True
+    s = str(exc).lower()
+    return "401" in s or "unauthorized" in s or "invalid_grant" in s or "token expired" in s or "invalidauthenticationtoken" in s
 
 
 def atlassian_cloud_id(access_token: str, fetch=None) -> str | None:  # pragma: no cover - real network

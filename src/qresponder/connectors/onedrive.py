@@ -1,46 +1,27 @@
-"""OneDrive connector (Phase 12) — extras-gated, injectable client, offline-tested.
+"""OneDrive connector (Phase 12; hardened Phase 16) — Microsoft Graph, offline-tested.
 
-Fetches documents from one user-specified OneDrive folder via Microsoft Graph,
-using the user's own token (server-side config, never the browser), and ingests
-them via the existing bulk path. The real client is lazy-imported so the slim
-image and import-guard hold. Runs only on explicit `connect onedrive`.
+Uses the user's Microsoft OAuth token (Files.Read.All) against Graph
+(https://graph.microsoft.com/v1.0): list items under the chosen folder in the user's
+drive, download textual files via /content. @odata.nextLink pagination to completion,
+bounded by max_items. Shares the Graph drive walk with the SharePoint connector; the
+HTTP fetcher is injectable so it runs offline. Runs only on explicit connect/test/sync.
 """
 
 from __future__ import annotations
 
-from .base import ConnectorError, TokenConnector
+from .base import TokenConnector, default_http
+from .sharepoint import _GRAPH, graph_drive_client
 
 
 class OneDriveConnector(TokenConnector):
     service = "OneDrive"
-    env_hint = "set microsoft_token in .env"
+    env_hint = "sign in with Microsoft (OAuth)"
     default_ext = ".txt"
 
-    def _make_client(self):  # pragma: no cover - real network/SDK path
-        try:
-            import requests  # type: ignore
-        except ImportError as exc:
-            raise ConnectorError(
-                'OneDrive needs the optional extra: pip install "qresponder[connectors]".'
-            ) from exc
-        headers = {"Authorization": f"Bearer {self.token}"}
-        graph = "https://graph.microsoft.com/v1.0"
-
-        def _client(folder_path: str):
-            docs = []
-            seg = f":/{folder_path.strip('/')}:" if folder_path.strip("/") else ""
-            url = f"{graph}/me/drive/root{seg}/children"
-            while url and len(docs) < self.max_items:
-                r = requests.get(url, headers=headers, timeout=self.timeout)
-                r.raise_for_status()
-                data = r.json()
-                for item in data.get("value", []):
-                    if "file" not in item:
-                        continue
-                    dl = item.get("@microsoft.graph.downloadUrl")
-                    text = requests.get(dl, timeout=self.timeout).text if dl else ""
-                    docs.append({"name": item.get("name"), "text": text, "url": item.get("webUrl")})
-                url = data.get("@odata.nextLink")
-            return docs
-
-        return _client
+    def _make_client(self):
+        http = self._http or default_http(self.timeout)
+        headers = {"Authorization": f"Bearer {self.token}", "Accept": "application/json"}
+        folder = (self.target or "").strip("/")
+        root = (f"{_GRAPH}/me/drive/root:/{folder}:/children" if folder
+                else f"{_GRAPH}/me/drive/root/children")
+        return graph_drive_client(http, headers, root, self.max_items)

@@ -66,6 +66,8 @@ class Config(BaseModel):
     google_client_secret: str = ""
     confluence_client_id: str = ""
     confluence_client_secret: str = ""
+    microsoft_client_id: str = ""
+    microsoft_client_secret: str = ""
     oauth_redirect_base: str = "http://127.0.0.1:8000"
 
     # Local / generic OpenAI-compatible path (Ollama / vLLM / LM Studio / OpenRouter)
@@ -173,6 +175,8 @@ _ENV_MAP = {
     "GOOGLE_CLIENT_SECRET": "google_client_secret",
     "CONFLUENCE_CLIENT_ID": "confluence_client_id",
     "CONFLUENCE_CLIENT_SECRET": "confluence_client_secret",
+    "MICROSOFT_CLIENT_ID": "microsoft_client_id",
+    "MICROSOFT_CLIENT_SECRET": "microsoft_client_secret",
     "OAUTH_REDIRECT_BASE": "oauth_redirect_base",
     "LLM_BASE_URL": "llm_base_url",
     "LLM_API_KEY": "llm_api_key",

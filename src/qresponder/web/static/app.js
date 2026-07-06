@@ -1130,13 +1130,13 @@ function connForm(wid, c, connectors, onDone) {
       el("button", { class: "btn ghost", onclick: () => m.close() }, "Cancel"),
       el("button", { class: "btn primary", onclick: async () => {
         try {
-          const { authorize_url } = await api(`/api/workspaces/${wid}/connections/${c.oauth_provider}/authorize?label=${encodeURIComponent(label.value || c.label)}`);
+          const { authorize_url } = await api(`/api/workspaces/${wid}/connections/${c.type}/authorize?label=${encodeURIComponent(label.value || c.label)}`);
           const w = window.open(authorize_url, "qr-oauth", "width=560,height=720");
           const finish = () => { m.close(); toast(`${c.label} connected.`, "good"); onDone && onDone(); };
           const onMsg = (ev) => { if (ev.data === "qr-oauth-done") { cleanup(); finish(); } };
           const poll = setInterval(async () => {
             const conns = await api(`/api/workspaces/${wid}/connections`).catch(() => ({ connections: [] }));
-            if ((conns.connections || []).some((x) => x.type === c.oauth_provider && x.status === "connected")) { cleanup(); finish(); }
+            if ((conns.connections || []).some((x) => x.type === c.type && x.status === "connected")) { cleanup(); finish(); }
             if (w && w.closed) clearInterval(poll);
           }, 2000);
           const cleanup = () => { clearInterval(poll); window.removeEventListener("message", onMsg); };

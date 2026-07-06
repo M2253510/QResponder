@@ -136,10 +136,12 @@ class ConnectionStore:
         return self._load_secrets().get(cid)
 
 
-def build_connector(type: str, config: dict, secret: dict | None, tags=None, client=None, probe: bool = False):
+def build_connector(type: str, config: dict, secret: dict | None, tags=None, client=None,
+                    http=None, probe: bool = False):
     """Map a connection (type + non-secret config + server-side secret) to a live
-    connector. `client` is injectable so tests never hit a SaaS API; `probe` caps
-    the fetch for a lightweight Test connection. Lazy imports keep the slim image."""
+    connector. `client` (docs) and `http` (real API) are injectable so tests never hit
+    a SaaS API; `probe` caps the fetch for a lightweight Test connection. Lazy imports
+    keep the slim image."""
     from ..connectors.base import ConnectorError
 
     cfg = config or {}
@@ -160,7 +162,7 @@ def build_connector(type: str, config: dict, secret: dict | None, tags=None, cli
     if type == "gdrive":
         from ..connectors.gdrive import GoogleDriveConnector
 
-        return GoogleDriveConnector(cfg.get("folder_id", ""), token=token, tags=tags, client=client, max_items=cap)
+        return GoogleDriveConnector(cfg.get("folder_id", ""), token=token, tags=tags, client=client, http=http, max_items=cap)
     if type == "confluence":
         from ..connectors.confluence import ConfluenceConnector
 
@@ -170,13 +172,13 @@ def build_connector(type: str, config: dict, secret: dict | None, tags=None, cli
     if type == "notion":
         from ..connectors.notion import NotionConnector
 
-        return NotionConnector(cfg.get("database", ""), token=token, tags=tags, client=client, max_items=cap)
+        return NotionConnector(cfg.get("database", ""), token=token, tags=tags, client=client, http=http, max_items=cap)
     if type == "sharepoint":
         from ..connectors.sharepoint import SharePointConnector
 
-        return SharePointConnector(cfg.get("site", ""), token=token, tags=tags, client=client, max_items=cap)
+        return SharePointConnector(cfg.get("site", ""), token=token, tags=tags, client=client, http=http, max_items=cap)
     if type == "onedrive":
         from ..connectors.onedrive import OneDriveConnector
 
-        return OneDriveConnector(cfg.get("folder", ""), token=token, tags=tags, client=client, max_items=cap)
+        return OneDriveConnector(cfg.get("folder", ""), token=token, tags=tags, client=client, http=http, max_items=cap)
     raise ConnectorError(f"unknown connection type: {type}")

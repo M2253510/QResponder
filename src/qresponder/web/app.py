@@ -131,7 +131,8 @@ def create_app(config: Config | None = None, model_fetch=None) -> FastAPI:
     app.state.oauth_fetch = None  # injectable token-exchange HTTP fetcher (tests)
     app.state.oauth_cloud_fetch = None  # injectable Atlassian cloud-id fetcher (tests)
     app.state.confluence_fetch = None  # injectable Confluence Cloud GET (space listing; tests)
-    app.state.connector_client = None  # injectable SaaS client for connection test/sync (tests)
+    app.state.connector_client = None  # injectable SaaS client (docs) for connection test/sync (tests)
+    app.state.connector_http = None  # injectable HTTP fetcher (real API shapes) for connection test/sync (tests)
 
     # ---- run machinery (shared by legacy + workspace runs) -----------------
     def _emit(job: _Job, event: dict):
@@ -400,7 +401,10 @@ def create_app(config: Config | None = None, model_fetch=None) -> FastAPI:
                 from ..core.connections import ConnectionStore
 
                 cstore = ConnectionStore(store.get(wid).path)
-                cstore.create(provider, flow.get("label"), config={}, secret=token, status="connected")
+                # Create the connection of the requested TYPE (SharePoint/OneDrive both
+                # authenticate via the Microsoft provider), token stored server-side.
+                cstore.create(flow.get("ctype") or provider, flow.get("label"), config={},
+                              secret=token, status="connected")
             except Exception:  # noqa: BLE001
                 oauth_tokens.save(provider, token)
         else:
@@ -432,7 +436,42 @@ def create_app(config: Config | None = None, model_fetch=None) -> FastAPI:
 
         tags = normalize_tags(conn.config.get("tags"))
         return build_connector(conn.type, conn.config, store.get_secret(conn.id), tags=tags,
-                               client=app.state.connector_client, probe=probe)
+                               client=app.state.connector_client, http=app.state.connector_http, probe=probe)
+
+    def _refresh_secret(conn, store) -> bool:
+        """Refresh the OAuth access token for a connection (using its stored refresh
+        token + the server-side client secret) and persist it. Server-side only.
+        Returns True if a new access token was obtained."""
+        from ..connectors.oauth import CONNECTOR_OAUTH, client_credentials, refresh_access_token
+
+        provider = CONNECTOR_OAUTH.get(conn.type)
+        secret = store.get_secret(conn.id) or {}
+        if not (provider and secret.get("refresh_token")):
+            return False
+        cid, csecret = client_credentials(config, provider)
+        if not (cid and csecret):
+            return False
+        try:
+            fresh = refresh_access_token(provider, secret["refresh_token"], cid, csecret, fetch=app.state.oauth_fetch)
+        except Exception:  # noqa: BLE001
+            return False
+        secret["access_token"] = fresh["access_token"]
+        if fresh.get("refresh_token"):
+            secret["refresh_token"] = fresh["refresh_token"]
+        store.set_secret(conn.id, secret)
+        return True
+
+    def _with_refresh(conn, store, op):
+        """Run op(connector); on an auth (401) failure, refresh the token once and
+        retry — so long-lived connections don't silently die."""
+        from ..connectors.oauth import is_auth_error
+
+        try:
+            return op(_build_from(conn, store, probe=False))
+        except Exception as exc:  # noqa: BLE001
+            if is_auth_error(exc) and _refresh_secret(conn, store):
+                return op(_build_from(conn, store, probe=False))
+            raise
 
     @app.post("/api/workspaces/{wid}/connections/test")
     def test_connection_ephemeral(wid: str, body: dict = Body(...)):
@@ -493,7 +532,8 @@ def create_app(config: Config | None = None, model_fetch=None) -> FastAPI:
 
     @app.post("/api/workspaces/{wid}/connections/{cid}/sync")
     def sync_connection(wid: str, cid: str, body: dict = Body(default={})):
-        """Fetch + ingest into kb/ via the existing bulk path. Explicit only."""
+        """Fetch + ingest into kb/ via the existing bulk path. Explicit only. Auto-
+        refreshes an expired OAuth token once (401) so the sync doesn't silently die."""
         from ..connectors.base import ConnectorError, ingest_connector
 
         store = _cstore(wid)
@@ -503,11 +543,15 @@ def create_app(config: Config | None = None, model_fetch=None) -> FastAPI:
         if body and body.get("config"):
             conn = store.update(cid, config=body["config"])
         tags = normalize_tags(conn.config.get("tags"))
+        kb_dir = _ws(wid).kb_dir
         try:
-            res = ingest_connector(_build_from(conn, store, probe=False), _ws(wid).kb_dir, tags=tags)
+            res = _with_refresh(conn, store, lambda c: ingest_connector(c, kb_dir, tags=tags))
         except ConnectorError as exc:
             store.update(cid, status="error")
             raise HTTPException(status_code=400, detail=str(exc))
+        except Exception as exc:  # noqa: BLE001 - surface a clean, non-secret message
+            store.update(cid, status="error")
+            raise HTTPException(status_code=400, detail=f"sync failed: {type(exc).__name__}")
         from ..core.connections import _now
 
         ls = _now()
@@ -524,21 +568,25 @@ def create_app(config: Config | None = None, model_fetch=None) -> FastAPI:
     def connection_authorize(wid: str, ctype: str, label: str = ""):
         """Start OAuth for a workspace connection — the browser is sent to the provider
         consent; the token is exchanged + stored server-side by the callback."""
-        from ..connectors.oauth import (OAUTH_SPECS, authorize_url, client_credentials,
-                                         make_pkce, make_state)
+        from ..connectors.oauth import (CONNECTOR_OAUTH, OAUTH_SPECS, authorize_url,
+                                         client_credentials, make_pkce, make_state)
 
         _ws(wid)
-        if ctype not in OAUTH_SPECS:
+        # A connection type maps to an OAuth provider (SharePoint/OneDrive → Microsoft).
+        provider = CONNECTOR_OAUTH.get(ctype, ctype)
+        if provider not in OAUTH_SPECS:
             raise HTTPException(status_code=400, detail="not an OAuth source")
-        client_id, secret = client_credentials(config, ctype)
+        client_id, secret = client_credentials(config, provider)
         if not (client_id and secret):
             raise HTTPException(status_code=400,
-                                detail=f"{OAUTH_SPECS[ctype]['label']} OAuth app not configured — set its client id/secret in .env.")
+                                detail=f"{OAUTH_SPECS[provider]['label']} OAuth app not configured — set its client id/secret in .env.")
         state = make_state()
         verifier, challenge = make_pkce()
         redirect_uri = config.oauth_redirect_base.rstrip("/") + "/api/oauth/callback"
-        oauth_pending[state] = {"provider": ctype, "verifier": verifier, "wid": wid, "label": label or OAUTH_SPECS[ctype]["label"]}
-        return {"authorize_url": authorize_url(ctype, client_id, redirect_uri, state, challenge)}
+        # Remember the connection TYPE so the callback creates the right connector.
+        oauth_pending[state] = {"provider": provider, "ctype": ctype, "verifier": verifier,
+                                "wid": wid, "label": label or OAUTH_SPECS[provider]["label"]}
+        return {"authorize_url": authorize_url(provider, client_id, redirect_uri, state, challenge)}
 
     @app.get("/api/connectors/confluence/spaces")
     def confluence_spaces():
@@ -561,7 +609,8 @@ def create_app(config: Config | None = None, model_fetch=None) -> FastAPI:
         signed in — but NEVER returns a credential, secret, or token."""
         from ..connectors.oauth import is_configured as oauth_configured
 
-        def oa(p):
+        def oa(ctype, provider=None):
+            p = provider or ctype  # SharePoint/OneDrive authenticate via the microsoft provider
             return {"oauth": True, "oauth_provider": p, "oauth_configured": oauth_configured(config, p),
                     "oauth_connected": oauth_tokens.has(p)}
         return [
@@ -578,10 +627,14 @@ def create_app(config: Config | None = None, model_fetch=None) -> FastAPI:
              "configured": bool(oauth_tokens.has("notion") or config.notion_token),
              "fields": [{"name": "database", "label": "Database id"}],
              "cred_hint": "Sign in with Notion, or set notion_token in .env", **oa("notion")},
-            {"type": "sharepoint", "label": "SharePoint", "needs_cred": True, "configured": bool(config.microsoft_token),
-             "fields": [{"name": "site", "label": "Site id"}], "cred_hint": "microsoft_token in .env"},
-            {"type": "onedrive", "label": "OneDrive", "needs_cred": True, "configured": bool(config.microsoft_token),
-             "fields": [{"name": "folder", "label": "Folder path (blank = root)"}], "cred_hint": "microsoft_token in .env"},
+            {"type": "sharepoint", "label": "SharePoint", "needs_cred": True,
+             "configured": bool(oauth_tokens.has("microsoft") or config.microsoft_token),
+             "fields": [{"name": "site", "label": "Site id"}],
+             "cred_hint": "Sign in with Microsoft, or set microsoft_token in .env", **oa("sharepoint", "microsoft")},
+            {"type": "onedrive", "label": "OneDrive", "needs_cred": True,
+             "configured": bool(oauth_tokens.has("microsoft") or config.microsoft_token),
+             "fields": [{"name": "folder", "label": "Folder path (blank = root)"}],
+             "cred_hint": "Sign in with Microsoft, or set microsoft_token in .env", **oa("onedrive", "microsoft")},
             {"type": "gdrive", "label": "Google Drive", "needs_cred": True,
              "configured": bool(oauth_tokens.has("gdrive")),
              "fields": [{"name": "folder_id", "label": "Folder id (blank = My Drive root)"}],

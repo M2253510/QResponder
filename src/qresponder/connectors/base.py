@@ -42,13 +42,36 @@ class Connector(ABC):
             return {"ok": False, "detail": f"{type(exc).__name__}: {exc}"}
 
 
+def default_http(timeout: int = 15):  # pragma: no cover - real network
+    """Stdlib HTTP fetcher matching the injectable contract:
+    http(method, url, headers=None, body=None, want="json") -> dict | bytes."""
+    import json as _json
+    import urllib.request
+
+    def _http(method, url, headers=None, body=None, want="json"):
+        data = _json.dumps(body).encode("utf-8") if body is not None else None
+        req = urllib.request.Request(url, data=data, headers=headers or {}, method=method)
+        with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310 - explicit connector fetch
+            raw = resp.read()
+        return _json.loads(raw.decode("utf-8")) if want == "json" else raw
+
+    return _http
+
+
 def _doc_name(raw: str, default_ext: str) -> str:
-    """A safe, KB-ingestable filename from a document title."""
-    slug = re.sub(r"[^a-z0-9]+", "-", (raw or "doc").lower()).strip("-") or "doc"
-    slug = slug[:80]
-    if not any(slug.endswith(e) for e in KB_INGEST_EXTS):
-        slug += default_ext
-    return slug
+    """A safe, KB-ingestable filename from a document title or filename. A real
+    trailing extension is preserved (so 'a.txt' stays '.txt'); a title with no
+    known extension gets the connector's default_ext."""
+    raw = (raw or "doc").strip()
+    ext = ""
+    low = raw.lower()
+    for e in KB_INGEST_EXTS:
+        if low.endswith(e):
+            ext = e
+            raw = raw[: -len(e)]
+            break
+    slug = (re.sub(r"[^a-z0-9]+", "-", raw.lower()).strip("-") or "doc")[:80]
+    return slug + (ext or default_ext)
 
 
 class TokenConnector(Connector):
@@ -67,12 +90,16 @@ class TokenConnector(Connector):
     default_ext = ".txt"
 
     def __init__(self, target: str, token: str | None = None, base_url: str | None = None,
-                 tags=None, client=None, timeout: int = 15, max_items: int = 200):
+                 tags=None, client=None, http=None, timeout: int = 15, max_items: int = 200):
         self.target = target
         self.token = token
         self.base_url = base_url
         self.tags = list(tags or [])
         self._client = client
+        # Injectable HTTP fetcher: http(method, url, headers=..., stream=False) -> dict|bytes.
+        # When set, the real per-provider client runs against it, so pagination/refresh
+        # logic is exercised OFFLINE against real-API-shaped mocks (no SDK, no network).
+        self._http = http
         self.timeout = timeout
         self.max_items = max(1, max_items)
 
