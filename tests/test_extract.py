@@ -17,6 +17,29 @@ def test_parse_json_array_handles_fences_and_prose():
     assert parse_json_array('{"a":1}') == [{"a": 1}]
 
 
+def test_parse_json_array_handles_object_wrapper():
+    # A model that wraps the array under a key (e.g. Gemini).
+    assert parse_json_array('{"questions": [{"a": 1}, {"b": 2}]}') == [{"a": 1}, {"b": 2}]
+
+
+def test_parse_json_array_salvages_truncated_output():
+    # Output cut off mid-array (max_tokens / "thinking" truncation) — recover the
+    # complete objects instead of failing outright.
+    truncated = '```json\n[\n  {"id": "1", "question_text": "Encrypt at rest?"},\n' \
+                '  {"id": "2", "question_text": "TLS version?"},\n' \
+                '  {"id": "3", "question_text": "MFA enfor'  # cut off here, no closing ]
+    out = parse_json_array(truncated)
+    assert len(out) == 2  # the two complete objects survive; the truncated third is dropped
+    assert out[0]["id"] == "1" and out[1]["question_text"] == "TLS version?"
+
+
+def test_parse_json_array_ignores_braces_in_strings():
+    # A brace inside a quoted value must not confuse the salvage scanner.
+    truncated = '[{"q": "what is {this}?", "n": 1}, {"q": "incompl'
+    out = parse_json_array(truncated)
+    assert out == [{"q": "what is {this}?", "n": 1}]
+
+
 def test_extract_from_xlsx_fixture():
     doc = load_document(FIX / "sample.xlsx")
     questions = extract_questions(doc, MockProvider())

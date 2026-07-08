@@ -51,7 +51,10 @@ def extract_questions(doc: Document, provider: LLMProvider) -> list[Question]:
     raw_items: list | None = None
     last_err: Exception | None = None
     for attempt in range(2):
-        text = provider.complete(system, user, max_tokens=4096)
+        # Generous budget: a large questionnaire yields a long JSON array, and some
+        # providers (e.g. Gemini's "thinking") consume part of the output budget
+        # before the JSON — too small a limit truncates the array mid-object.
+        text = provider.complete(system, user, max_tokens=8192)
         try:
             raw_items = parse_json_array(text)
             break
