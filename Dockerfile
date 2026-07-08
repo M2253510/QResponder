@@ -1,8 +1,10 @@
 # QRESPONDER — multi-stage image. Builds a self-contained venv, then a slim runtime.
 #
-# Default build includes web + retrieval + both cloud SDKs so `docker compose up`
-# gives a working web UI out of the box. Slim it via --build-arg EXTRAS=... if you
-# only need the CLI (e.g. EXTRAS=anthropic,openai).
+# Default build is SLIM: web UI + both cloud SDKs, no torch — so the image is small
+# and builds fast on every arch (amd64 + arm64). Retrieval mode still works via a
+# BM25 fallback; for full dense hybrid + cross-encoder rerank, either
+#   docker build --build-arg EXTRAS=anthropic,openai,web,retrieval -t qresponder .
+# or `pip install "qresponder[retrieval]"`.
 #
 #   docker build -t qresponder .
 #   docker run --rm -p 127.0.0.1:8000:8000 -v qr-data:/data qresponder
@@ -10,7 +12,7 @@
 # ---- builder: install into an isolated venv --------------------------------
 FROM python:3.12-slim AS builder
 
-ARG EXTRAS=anthropic,openai,web,retrieval
+ARG EXTRAS=anthropic,openai,web
 ENV PIP_NO_CACHE_DIR=1 PIP_DISABLE_PIP_VERSION_CHECK=1
 RUN python -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"

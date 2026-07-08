@@ -75,6 +75,68 @@ balancer. The token + TLS still apply.
 Same steps work on **AWS EC2**, **Azure VM**, **DigitalOcean**, Hetzner, or a bare VM —
 only the "create VM + firewall + static IP + DNS" UI differs.
 
+### AWS EC2
+
+1. Launch an instance (Ubuntu 22.04+, `t3.small`+). In its **security group**, allow
+   inbound `80` and `443` (from `0.0.0.0/0` for public, or your office/VPN CIDR for
+   internal). Allocate + associate an **Elastic IP**.
+2. Point a DNS **A record** at the Elastic IP.
+3. SSH in, install Docker (step 3 above), run the one-command stack.
+
+### Azure VM
+
+1. Create a VM (Ubuntu). In the VM's **Networking / NSG**, add inbound rules for
+   `80` and `443`. Give it a **static public IP** (or a private one for internal use).
+2. Point DNS at the IP.
+3. SSH in, install Docker, run the one-command stack.
+
+---
+
+## No Docker? Run it with systemd
+
+If you'd rather run the app directly (no Docker), install it and add a service unit.
+Put a reverse proxy (Caddy/nginx) in front for TLS, and set `QRESPONDER_AUTH_TOKEN`.
+
+```bash
+sudo useradd -r -m -d /opt/qresponder qr
+sudo -u qr python3 -m venv /opt/qresponder/venv
+sudo -u qr /opt/qresponder/venv/bin/pip install "qresponder[web,retrieval]"
+```
+
+`/etc/systemd/system/qresponder.service`:
+
+```ini
+[Unit]
+Description=QRESPONDER web UI
+After=network.target
+
+[Service]
+User=qr
+WorkingDirectory=/opt/qresponder
+EnvironmentFile=/opt/qresponder/.env
+# Bind loopback and let your reverse proxy terminate TLS + reach it.
+ExecStart=/opt/qresponder/venv/bin/qresponder serve --host 127.0.0.1 --port 8000
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
+```
+
+```bash
+sudo systemctl daemon-reload && sudo systemctl enable --now qresponder
+```
+
+---
+
+## A note on the published image
+
+The published image `ghcr.io/scorpionus007/qresponder` is **slim** (no torch): retrieval
+mode runs via a **BM25 fallback**, which is fine for keyword-heavy questionnaire
+content. For full **dense hybrid retrieval + cross-encoder rerank** on a large KB,
+either build with the retrieval extra
+(`docker build --build-arg EXTRAS=anthropic,openai,web,retrieval …`) or, for the
+systemd path, the `pip install "qresponder[web,retrieval]"` above already includes it.
+
 ---
 
 ## Bring your own reverse proxy (nginx / Traefik)
