@@ -353,7 +353,10 @@ def answer(
     from .output.writeback import has_answer_anchors, write_back
 
     src_ext = Path(questionnaire).suffix.lower()
-    do_writeback = writeback or (src_ext in {".xlsx", ".xlsm", ".docx"} and has_answer_anchors(result))
+    # PDF appends a Responses section (no anchors needed), so auto-enable it; xlsx/docx
+    # auto-enable only when the file has answer anchors to fill.
+    do_writeback = writeback or src_ext == ".pdf" or (
+        src_ext in {".xlsx", ".xlsm", ".docx"} and has_answer_anchors(result))
     if do_writeback:
         wb = write_back(result, questionnaire, out, review_markers=review_markers)
         if wb.get("written"):
