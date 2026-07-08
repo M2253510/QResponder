@@ -7,6 +7,7 @@ import openpyxl
 from qresponder.models import (
     AnswerResult,
     AnswerType,
+    Citation,
     Confidence,
     QuestionnaireResult,
     ReviewReason,
@@ -297,3 +298,64 @@ def test_writeback_docx_paragraph(tmp_path):
     info = write_back(result, str(orig), str(tmp_path / "out"))
     out_doc = docx.Document(info["written"])
     assert "AES-256" in out_doc.paragraphs[0].text
+
+
+def _make_pdf(path, lines):
+    from fpdf import FPDF
+    from fpdf.enums import XPos, YPos
+
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_font("Helvetica", "", 12)
+    for line in lines:
+        pdf.multi_cell(0, 8, line, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.output(str(path))
+
+
+def _pdf_text(path):
+    import pdfplumber
+
+    with pdfplumber.open(str(path)) as doc:
+        return "\n".join(p.extract_text() or "" for p in doc.pages), len(doc.pages)
+
+
+def test_writeback_pdf_appends_answers_and_preserves_original(tmp_path):
+    orig = tmp_path / "q.pdf"
+    _make_pdf(orig, ["Security Questionnaire", "Do you encrypt data at rest?"])
+    _, orig_pages = _pdf_text(orig)
+
+    r = _answered("q1", "Do you encrypt data at rest?", "Yes, AES-256 at rest.", None)
+    r.answer_type = AnswerType.TEXT
+    r.citations = [Citation(source="encryption-policy.md", snippet="AES-256")]
+    result = QuestionnaireResult(source_file=str(orig), results=[r])
+
+    info = write_back(result, str(orig), str(tmp_path / "out"))
+    assert info["written"] and not info["fallback"]
+    assert info["original_preserved"] is True
+
+    text, pages = _pdf_text(info["written"])
+    assert pages > orig_pages  # answer section was appended
+    assert "Do you encrypt data at rest?" in text  # original question preserved
+    assert "AES-256 at rest" in text  # grounded answer written in
+    assert "encryption-policy.md" in text  # source line
+
+
+def test_writeback_pdf_marks_flagged_questions(tmp_path):
+    orig = tmp_path / "q.pdf"
+    _make_pdf(orig, ["Do you hold ISO 42001 certification?"])
+
+    r = AnswerResult(
+        question_id="q1",
+        question_text="Do you hold ISO 42001 certification?",
+        answer="",
+        answer_type=AnswerType.YES_NO,
+        confidence=Confidence.LOW,
+        status=Status.NEEDS_REVIEW,
+        review_reason=ReviewReason.UNSUPPORTED,
+    )
+    result = QuestionnaireResult(source_file=str(orig), results=[r])
+    info = write_back(result, str(orig), str(tmp_path / "out"))
+    text, _ = _pdf_text(info["written"])
+    # The flagged question still appears with a visible review marker (not blank).
+    assert "ISO 42001" in text
+    assert "REVIEW" in text.upper()

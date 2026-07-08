@@ -357,7 +357,10 @@ def answer(
     if do_writeback:
         wb = write_back(result, questionnaire, out, review_markers=review_markers)
         if wb.get("written"):
-            typer.echo(f"  writeback: {wb['written']} ({wb.get('cells', 0)} cell(s))")
+            # xlsx/docx report filled cells; pdf reports appended answers.
+            n = wb.get("cells", wb.get("answers", 0))
+            unit = "answer" if "answers" in wb else "cell"
+            typer.echo(f"  writeback: {wb['written']} ({n} {unit}(s))")
         elif wb.get("fallback"):
             typer.secho(
                 f"  writeback skipped ({wb.get('reason')}); use the answered.* file above.",

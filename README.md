@@ -416,7 +416,10 @@ one-click confirmation. It never attaches a file below the margin without
 flagging.
 
 **Format-perfect write-back.** Fill answers into a *copy* of your original
-template (`<name>.answered.xlsx`/`.docx`), never the original:
+template (`<name>.answered.xlsx`/`.docx`/`.pdf`), never the original. Excel and
+Word are filled in their native cells; PDF keeps the original pages untouched and
+appends a grounded **Responses** section (arbitrary PDFs have no editable cell
+model to write into safely):
 
 ```
 qresponder answer -q f.xlsx --kb ./kb --writeback

@@ -1435,9 +1435,14 @@ def create_app(config: Config | None = None, model_fetch=None) -> FastAPI:
         paths = write_all(job.result, job.out_dir, review_markers=job.review_markers)
         artifacts = {k: Path(v).name for k, v in paths.items()}
         writeback_info = {"written": None, "fallback": False}
-        if job.questionnaire_path and Path(job.questionnaire_path).suffix.lower() in {
-            ".xlsx", ".xlsm", ".docx"
-        } and has_answer_anchors(job.result):
+        # PDF write-back appends a Responses section, so it needs no per-answer
+        # anchors; xlsx/docx fill native cells and require them.
+        _ext = Path(job.questionnaire_path).suffix.lower() if job.questionnaire_path else ""
+        _can_writeback = (
+            _ext == ".pdf"
+            or (_ext in {".xlsx", ".xlsm", ".docx"} and has_answer_anchors(job.result))
+        )
+        if _can_writeback:
             wb = write_back(job.result, job.questionnaire_path, str(job.out_dir),
                             review_markers=job.review_markers)
             writeback_info = {

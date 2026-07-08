@@ -7,6 +7,14 @@ versioning.
 ## [Unreleased]
 
 ### Added
+- **PDF write-back — every ingested format now writes back.** Previously only
+  `.xlsx/.xlsm` and `.docx` were filled in place; PDF questionnaires got answers
+  only in the separate outputs. `answer --writeback` (and the web Export) now
+  produce `<name>.answered.pdf` that keeps the original pages untouched and appends
+  a grounded **Responses** section — each question with its answer (or a red review
+  marker) and its source. Adds `pypdf` + `fpdf2` to the base install. Needs no
+  per-answer anchors, so it works on any PDF.
+
 - **One-command hosted stack.** `docker-compose.hosted.yml` + a `Caddyfile` run the app
   internally with **Caddy for automatic Let's Encrypt HTTPS** in front — set
   `QR_DOMAIN`, `QR_ACME_EMAIL`, `QRESPONDER_AUTH_TOKEN` and `docker compose -f

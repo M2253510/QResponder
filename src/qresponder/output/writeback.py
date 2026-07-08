@@ -1,5 +1,9 @@
 """Format-perfect write-back into the ORIGINAL file (§15) — Phase 2.
 
+Covers every ingested questionnaire format: xlsx/xlsm and docx fill answers into
+their native cells/anchors; pdf preserves the original pages and appends a
+grounded 'Responses' section (arbitrary PDFs have no editable cell model).
+
 Fills each answer into the user's own template, in a COPY, honoring the traps
 that silently corrupt files:
   * merged ranges — write only to the top-left anchor (writing to a non-anchor
@@ -229,6 +233,85 @@ def _writeback_docx(result: QuestionnaireResult, original_path: Path, out_path: 
     return {"written": str(out_path), "fallback": False, "cells": written}
 
 
+# --- pdf ----------------------------------------------------------------------
+
+def _pdf_txt(s: str) -> str:
+    """fpdf2's core fonts are Latin-1; map anything outside it (smart quotes,
+    em-dashes, bullets) to a safe representation so answer text never crashes the
+    writer."""
+    subs = {"‘": "'", "’": "'", "“": '"', "”": '"',
+            "–": "-", "—": "-", "•": "-", "…": "...", " ": " "}
+    for k, v in subs.items():
+        s = s.replace(k, v)
+    return s.encode("latin-1", "replace").decode("latin-1")
+
+
+def _writeback_pdf(result: QuestionnaireResult, original_path: Path, out_path: Path,
+                   review_markers: bool = True) -> dict:
+    """PDF write-back. Arbitrary PDFs aren't reliably editable in place (fixed
+    layouts, no cell model), so we PRESERVE the original pages untouched and
+    APPEND a clearly-labeled 'Responses' section — each question with its grounded
+    answer (or a review marker) and source. The original is never overwritten."""
+    try:
+        from io import BytesIO
+
+        from fpdf import FPDF
+        from fpdf.enums import XPos, YPos
+        from pypdf import PdfReader, PdfWriter
+    except ImportError as exc:  # pragma: no cover - deps are in base install
+        return {"written": None, "fallback": True,
+                "reason": f"PDF write-back needs pypdf + fpdf2 ({exc})"}
+
+    # Each multi_cell returns the cursor to the left margin and drops a line, so a
+    # width-0 (full-width) cell always has room to render.
+    def _cell(size, text, style="", rgb=(0, 0, 0), h=5.5):
+        pdf.set_font("Helvetica", style, size)
+        pdf.set_text_color(*rgb)
+        pdf.multi_cell(0, h, _pdf_txt(text), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+
+    pdf = FPDF(format="A4")
+    pdf.set_auto_page_break(auto=True, margin=15)
+    pdf.set_margins(15, 15, 15)
+    pdf.add_page()
+    _cell(15, "QRESPONDER - Responses", style="B", h=8)
+    _cell(8, f"Answers for {original_path.name}. Grounded in your knowledge base; "
+             "review any flagged items before sending. The original questionnaire "
+             "pages precede this section, unchanged.", rgb=(110, 110, 110), h=5)
+    pdf.ln(3)
+
+    written = 0
+    for i, r in enumerate(result.results, start=1):
+        value = _cell_value(r, review_markers=review_markers)
+        if value is None:
+            continue
+        _cell(10, f"{i}. {r.question_text}", style="B")
+        needs = r.status == Status.NEEDS_REVIEW
+        _cell(10, value, style="I" if needs else "",
+              rgb=(192, 57, 43) if needs else (0, 0, 0))  # match xlsx/docx marker red
+        srcs = ", ".join(dict.fromkeys(c.source for c in r.citations if c.source))
+        if srcs:
+            _cell(8, f"Source: {srcs}", rgb=(110, 110, 110), h=4.5)
+        pdf.ln(3)
+        written += 1
+
+    answers_pdf = BytesIO(bytes(pdf.output()))
+
+    writer = PdfWriter()
+    original_merged = True
+    try:
+        writer.append(PdfReader(str(original_path)))  # original pages, untouched
+    except Exception as exc:  # noqa: BLE001 - corrupt/locked source: emit answers alone
+        log.warning("Could not merge original PDF (%s); writing answers-only PDF.", exc)
+        writer = PdfWriter()
+        original_merged = False
+    writer.append(PdfReader(answers_pdf))
+    with open(out_path, "wb") as f:
+        writer.write(f)
+    writer.close()
+    return {"written": str(out_path), "fallback": False,
+            "answers": written, "original_preserved": original_merged}
+
+
 # --- entry point -------------------------------------------------------------
 
 def has_answer_anchors(result: QuestionnaireResult) -> bool:
@@ -249,4 +332,6 @@ def write_back(result: QuestionnaireResult, original_path: str, out_dir: str,
         return _writeback_xlsx(result, src, out_path, review_markers=review_markers)
     if ext == ".docx":
         return _writeback_docx(result, src, out_path, review_markers=review_markers)
+    if ext == ".pdf":
+        return _writeback_pdf(result, src, out_path, review_markers=review_markers)
     return {"written": None, "fallback": True, "reason": f"write-back unsupported for {ext}"}
